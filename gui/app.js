@@ -96,6 +96,20 @@ const elements = {
 
 const mmfDesktopApi = window.desktopApi || null;
 
+async function showConfirmDialog(message) {
+    if (mmfDesktopApi && mmfDesktopApi.showConfirmDialog) {
+        return mmfDesktopApi.showConfirmDialog(message);
+    }
+    return window.confirm(message);
+}
+
+async function showAlertDialog(message) {
+    if (mmfDesktopApi && mmfDesktopApi.showAlertDialog) {
+        return mmfDesktopApi.showAlertDialog(message);
+    }
+    window.alert(message);
+}
+
 let lastDependencySummary = null;
 let activeRunId = null;
 let latestRunId = null;
@@ -2013,7 +2027,7 @@ async function autoLoadOwnModelIds(options = {}) {
     }
 
     if (!silent && modelIdEntries.length > 0) {
-        const confirmed = window.confirm("Replace current model list with auto-loaded IDs?");
+        const confirmed = await showConfirmDialog("Replace current model list with auto-loaded IDs?");
         if (!confirmed) {
             setStatus("Auto-load canceled.", "warn");
             return;
@@ -2489,7 +2503,7 @@ async function installMissingDependencies() {
         return;
     }
 
-    const confirmed = window.confirm("Install missing dependencies now? This may trigger UAC prompts.");
+    const confirmed = await showConfirmDialog("Install missing dependencies now? This may trigger UAC prompts.");
     if (!confirmed) {
         setStatus("Dependency installation canceled by user.", "warn");
         return;
@@ -2797,7 +2811,7 @@ async function executePipeline() {
 
         setRunStatus(`Pipeline blocked until setup is ready: ${details}`, "bad");
         setStatus(`Setup not ready: ${details}`, "bad");
-        window.alert(`Pipeline blocked. Fix these checks first:\n- ${details.replace(/ \| /g, "\n- ")}`);
+        await showAlertDialog(`Pipeline blocked. Fix these checks first:\n- ${details.replace(/ \| /g, "\n- ")}`);
         return;
     }
 
@@ -3121,13 +3135,13 @@ if (elements.batchSizeSelect) {
 }
 
 if (elements.resetBatchProgressBtn) {
-    elements.resetBatchProgressBtn.addEventListener("click", () => {
+    elements.resetBatchProgressBtn.addEventListener("click", async () => {
         if (isDownloadRootLocked()) {
             setStatus("Cannot reset batch progress while a pipeline is active.", "warn");
             return;
         }
 
-        const confirmed = window.confirm("Reset completed batch progress for the current model selection?");
+        const confirmed = await showConfirmDialog("Reset completed batch progress for the current model selection?");
         if (!confirmed) {
             return;
         }
@@ -3193,7 +3207,7 @@ if (elements.checkSessionBtn) {
     });
 }
 
-elements.validateBtn.addEventListener("click", () => {
+elements.validateBtn.addEventListener("click", async () => {
     const state = refreshDashboard();
     const failedRequired = state.requirements
         .filter((item) => item.required && !item.pass)
@@ -3202,7 +3216,7 @@ elements.validateBtn.addEventListener("click", () => {
     if (state.readiness === 100) {
         const okMessage = "All required checks passed. You can continue with the workflow.";
         setStatus(okMessage, "ok");
-        window.alert(okMessage);
+        await showAlertDialog(okMessage);
         return;
     }
 
@@ -3211,7 +3225,7 @@ elements.validateBtn.addEventListener("click", () => {
         : "Review the checklist on the right.";
 
     setStatus(`Setup validation failed: ${details}`, "bad");
-    window.alert(`Setup validation failed:\n- ${details.replace(/ \| /g, "\n- ")}`);
+    await showAlertDialog(`Setup validation failed:\n- ${details.replace(/ \| /g, "\n- ")}`);
 });
 
 elements.downloadIdsBtn.addEventListener("click", () => {

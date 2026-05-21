@@ -2628,6 +2628,27 @@ ipcMain.handle("desktop:resolve-own-model-ids", async (_event, payload) => {
     return resolveOwnModelIds(payload);
 });
 
+ipcMain.handle("desktop:show-confirm-dialog", async (_event, payload) => {
+    const message = typeof payload === "string" ? payload : (payload && payload.message) || "";
+    const result = await dialog.showMessageBox(mainWindow, {
+        type: "question",
+        buttons: ["OK", "Cancel"],
+        defaultId: 0,
+        cancelId: 1,
+        message
+    });
+    return result.response === 0;
+});
+
+ipcMain.handle("desktop:show-alert-dialog", async (_event, payload) => {
+    const message = typeof payload === "string" ? payload : (payload && payload.message) || "";
+    await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        buttons: ["OK"],
+        message
+    });
+});
+
 ipcMain.handle("desktop:open-mmf-login", async () => {
     try {
         const saved = loadSettingsFromDisk();

@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
     loadSettings: () => ipcRenderer.invoke("desktop:load-settings"),
     saveSettings: (payload) => ipcRenderer.invoke("desktop:save-settings", payload),
     resolveOwnModelIds: (payload) => ipcRenderer.invoke("desktop:resolve-own-model-ids", payload),
+    showConfirmDialog: (payload) => ipcRenderer.invoke("desktop:show-confirm-dialog", payload),
+    showAlertDialog: (payload) => ipcRenderer.invoke("desktop:show-alert-dialog", payload),
     openMmfLogin: () => ipcRenderer.invoke("desktop:open-mmf-login"),
     captureMmfSession: () => ipcRenderer.invoke("desktop:capture-mmf-session"),
     validateMmfSession: () => ipcRenderer.invoke("desktop:validate-mmf-session"),
