@@ -949,9 +949,10 @@ select:focus {
 .pipeline-progress-panel {
     margin: 12px 0 4px;
     padding: 12px 14px;
-    border: 1px solid rgba(15, 118, 110, 0.22);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(15, 118, 110, 0.18);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    background: rgba(248, 251, 250, 0.92);
 }
 
 .pipeline-progress-panel.hidden {
@@ -982,10 +983,34 @@ select:focus {
 .pipeline-progress-track {
     margin-top: 0;
     height: 14px;
+    background: rgba(16, 35, 29, 0.1);
+}
+
+.pipeline-progress-track .progress-bar {
+    position: relative;
+    overflow: hidden;
+    background-image:
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.24) 0 8px, transparent 8px 16px),
+        linear-gradient(90deg, var(--accent), var(--accent-warm));
+}
+
+.pipeline-progress-track .progress-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
+    transform: translateX(-100%);
+    animation: progress-sheen 1.8s ease-in-out infinite;
 }
 
 .pipeline-progress-detail {
     margin: 8px 0 0;
+}
+
+@keyframes progress-sheen {
+    to {
+        transform: translateX(100%);
+    }
 }
 
 .preview {

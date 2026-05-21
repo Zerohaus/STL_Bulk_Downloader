@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.4.0] — 2026-05-21
+
+### Added
+- **Batch size 10** option in the desktop UI (alongside 25, 50, 100, and all pending).
+- **Pipeline progress panel** below Execute Pipeline / Download Next Batch: percentage bar plus phase labels for metadata download and Step 2 packaging.
+- Structured **`MMF_PROGRESS`** JSON events from Step 1 and Step 2 (enabled via `MMF_EMIT_PROGRESS=1` from the desktop app) for accurate UI updates instead of parsing colored log text alone.
+- **Step 2 batch filter** (`MMF_MODEL_IDS_FILTER`): automatic pipeline passes the current batch IDs so Step 2 can limit processing to that batch when the filter is set.
+- Per-model **live “completed” row styling** during a run (ZIP-ready), before the batch is written to persisted progress.
+- **Saved download folders**: missing paths are removed from history when Open reports they do not exist.
+
+### Changed
+- Model list pagination set to **20 rows per page**; the ID / Model and creator table keeps a **5-row scroll viewport** to save vertical space.
+- **Open folder** allowed roots now include every path in `downloadRootHistory`, not only the active Download folder and post-process paths.
+- **Remove** on model list rows is disabled while a workflow step or batch pipeline is running.
+
+### Fixed
+- Completed models stayed unhighlighted until changing list page; the list now refreshes when batch progress updates and when each model finishes packaging.
+- **“Path is outside the allowed download workspace”** when opening a folder from saved history that was not the current Download folder root.
+
 ## [1.3.0] — 2026-05-20
 
 ### Added

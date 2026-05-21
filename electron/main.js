@@ -1858,6 +1858,14 @@ function normalizeModelIdsText(text) {
         .join("\n");
 }
 
+function buildModelIdsFilterText(text) {
+    if (typeof text !== "string") {
+        return "";
+    }
+
+    return sanitizeNumericIdList(text.split(/[\s,;]+/)).join("\n");
+}
+
 function normalizeCookie(cookie) {
     if (typeof cookie !== "string") {
         return "";
@@ -2283,6 +2291,7 @@ function buildStepPlan(stepKey, rawConfig) {
                 ...(medusaPublishableKey ? { MMF_PUBLISHABLE_KEY: medusaPublishableKey } : {}),
                 MMF_DOWNLOAD_ROOT: downloadsPath,
                 MMF_MODEL_IDS_PATH: modelIdsPath,
+                MMF_EMIT_PROGRESS: "1",
                 PATH: processPathWithResolvedJq,
                 ...getRateLimitEnv()
             },
@@ -2339,6 +2348,7 @@ function buildStepPlan(stepKey, rawConfig) {
         if (stepKey === "step2-test") {
             args.push("--test");
         }
+        const modelIdsFilterText = buildModelIdsFilterText(modelIdsText);
 
         return {
             accepted: true,
@@ -2355,6 +2365,8 @@ function buildStepPlan(stepKey, rawConfig) {
                 MMF_CATEGORY_SELECTION_TAG_NAMES_JSON: categorySelectionTagNamesJson,
                 MMF_NAMING_FORMAT: namingFormat,
                 MMF_MAX_NAME_LENGTH: String(maxNameLength),
+                MMF_EMIT_PROGRESS: "1",
+                ...(modelIdsFilterText ? { MMF_MODEL_IDS_FILTER: modelIdsFilterText } : {}),
                 PATH: processPathWithResolvedJq,
                 ...getRateLimitEnv()
             },

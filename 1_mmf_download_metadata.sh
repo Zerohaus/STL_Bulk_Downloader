@@ -22,6 +22,14 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
+emit_progress_event() {
+    if [[ "${MMF_EMIT_PROGRESS:-0}" != "1" ]]; then
+        return 0
+    fi
+
+    printf 'MMF_PROGRESS %s\n' "$1"
+}
+
 # UPDATE THIS: Get your cookie from browser developer tools (F12 -> Network -> Copy Cookie header)
 COOKIE="${MMF_COOKIE:-REPLACE_WITH_YOUR_ACTUAL_COOKIE_STRING}"
 METADATA_DELAY_SEC="${MMF_METADATA_DELAY_SEC:-6}"
@@ -242,6 +250,7 @@ fi
 current=0
 
 echo -e "${BLUE}Starting download of $total model metadata files...${NC}"
+emit_progress_event "{\"step\":\"metadata\",\"event\":\"start\",\"total\":$total}"
 echo "JSON files will be saved in: $DOWNLOAD_ROOT"
 echo "Rate limited (~10 requests/min, ${METADATA_DELAY_SEC}s delay between requests)"
 echo -e "${CYAN}Minimum free space required before each download: ${METADATA_MIN_FREE_MB} MB${NC}"
@@ -262,12 +271,14 @@ while read -r id; do
     fi
     
     current=$((current + 1))
+    emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"started\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
 
     final_file="model_${id}.json"
     tmp_file="${final_file}.part"
 
     if [[ -f "$final_file" ]] && [[ -s "$final_file" ]]; then
         if is_valid_metadata_json "$final_file" "$id"; then
+            emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"skipped\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
             echo -e "${GREEN}[$current/$total] Skipping model $id (metadata already exists — resume safe)${NC}"
             continue
         else
@@ -304,21 +315,27 @@ while read -r id; do
     # Check if download was successful
     if [[ "$curl_exit" -eq 23 ]]; then
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
         abort_no_space "downloading metadata for model $id"
     elif [[ "$curl_exit" -ne 0 ]]; then
         echo -e "${RED}Failed to download metadata for model $id (curl exit $curl_exit, HTTP ${http_code:-unknown})${NC}"
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     elif [[ "$http_code" != "200" ]]; then
         echo -e "${RED}Failed to download metadata for model $id (HTTP ${http_code:-unknown})${NC}"
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     elif ! is_valid_metadata_json "$tmp_file" "$id"; then
         echo -e "${RED}Failed metadata validation for model $id (truncated/invalid JSON or unexpected content)${NC}"
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     elif ! mv -f "$tmp_file" "$final_file"; then
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
         abort_no_space "saving metadata file for model $id"
     else
         echo -e "${GREEN}Successfully downloaded metadata for model $id${NC}"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"downloaded\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     fi
     
     # Rate limiting between requests
@@ -327,6 +344,8 @@ while read -r id; do
     fi
     
 done < "$MODEL_IDS_FILE"
+
+emit_progress_event "{\"step\":\"metadata\",\"event\":\"done\",\"total\":$total}"
 
 echo ""
 echo -e "${GREEN}Metadata download complete!${NC}"

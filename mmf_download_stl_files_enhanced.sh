@@ -66,11 +66,80 @@ STL_FILE_DELAY_SEC="${MMF_STL_FILE_DELAY_SEC:-5}"
 IMAGE_DELAY_SEC="${MMF_IMAGE_DELAY_SEC:-3}"
 MIN_FREE_SPACE_MB="${MMF_MIN_FREE_SPACE_MB:-2048}"
 CURL_RETRIES="${MMF_CURL_RETRIES:-2}"
+MODEL_IDS_FILTER_RAW="${MMF_MODEL_IDS_FILTER:-}"
 
 DOWNLOAD_LAST_CURL_EXIT=0
 DOWNLOAD_LAST_HTTP_CODE=""
 DOWNLOAD_LAST_TMP_FILE=""
 DISK_CHECK_WARNED=0
+MODEL_IDS_FILTER_PADDED=""
+MODEL_IDS_FILTER_ACTIVE=0
+ASSET_PROGRESS_TOTAL_UNITS=0
+ASSET_PROGRESS_DONE_UNITS=0
+ASSET_PROGRESS_MODELS_DONE=0
+
+emit_progress_event() {
+    if [[ "${MMF_EMIT_PROGRESS:-0}" != "1" ]]; then
+        return 0
+    fi
+
+    printf 'MMF_PROGRESS %s\n' "$1"
+}
+
+load_model_ids_filter() {
+    local token
+    local normalized_filter
+    MODEL_IDS_FILTER_PADDED=""
+    MODEL_IDS_FILTER_ACTIVE=0
+
+    normalized_filter="${MODEL_IDS_FILTER_RAW//$'\r'/ }"
+    normalized_filter="${normalized_filter//,/ }"
+    normalized_filter="${normalized_filter//;/ }"
+
+    for token in $normalized_filter; do
+        token="$(printf "%s" "$token" | tr -d '\r' | xargs)"
+        if [[ "$token" =~ ^[0-9]+$ ]] && [[ "$MODEL_IDS_FILTER_PADDED" != *" $token "* ]]; then
+            MODEL_IDS_FILTER_PADDED="${MODEL_IDS_FILTER_PADDED} ${token}"
+        fi
+    done
+
+    if [[ -n "$MODEL_IDS_FILTER_PADDED" ]]; then
+        MODEL_IDS_FILTER_PADDED="${MODEL_IDS_FILTER_PADDED} "
+        MODEL_IDS_FILTER_ACTIVE=1
+    fi
+}
+
+is_model_id_selected() {
+    local model_id="$1"
+    [[ "$MODEL_IDS_FILTER_ACTIVE" -eq 0 || "$MODEL_IDS_FILTER_PADDED" == *" $model_id "* ]]
+}
+
+emit_asset_progress_start() {
+    emit_progress_event "{\"step\":\"assets\",\"event\":\"start\",\"totalModels\":$1,\"workTotal\":$2,\"workDone\":0,\"modelsDone\":0}"
+}
+
+emit_asset_progress_model_start() {
+    emit_progress_event "{\"step\":\"assets\",\"event\":\"model-start\",\"modelId\":\"$1\",\"currentModel\":$2,\"totalModels\":$3,\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_DONE_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
+}
+
+emit_asset_progress_unit() {
+    local model_id="$1"
+    local kind="$2"
+    local status="$3"
+
+    ASSET_PROGRESS_DONE_UNITS=$((ASSET_PROGRESS_DONE_UNITS + 1))
+    if [[ "$ASSET_PROGRESS_TOTAL_UNITS" -gt 0 && "$ASSET_PROGRESS_DONE_UNITS" -gt "$ASSET_PROGRESS_TOTAL_UNITS" ]]; then
+        ASSET_PROGRESS_DONE_UNITS="$ASSET_PROGRESS_TOTAL_UNITS"
+    fi
+
+    emit_progress_event "{\"step\":\"assets\",\"event\":\"unit\",\"modelId\":\"$model_id\",\"kind\":\"$kind\",\"status\":\"$status\",\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_DONE_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
+}
+
+emit_asset_progress_model_done() {
+    local model_id="$1"
+    ASSET_PROGRESS_MODELS_DONE=$((ASSET_PROGRESS_MODELS_DONE + 1))
+    emit_progress_event "{\"step\":\"assets\",\"event\":\"model-done\",\"modelId\":\"$model_id\",\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_DONE_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
+}
 
 if [[ ! "$MIN_FREE_SPACE_MB" =~ ^[0-9]+$ ]]; then
     MIN_FREE_SPACE_MB=2048
@@ -516,6 +585,37 @@ model_assets_already_archived() {
     find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null
 }
 
+count_model_progress_units() {
+    local source_json="$1"
+    local model_id="$2"
+    local model_dir
+    local downloadable_count
+    local image_count
+
+    downloadable_count=$($JQ_CMD -r '[.files.items[]? | .download_url | select(. != null and . != "")] | length' "$source_json" 2>/dev/null)
+    if [[ ! "$downloadable_count" =~ ^[0-9]+$ ]]; then
+        downloadable_count=0
+    fi
+
+    if [[ "$downloadable_count" -eq 0 ]]; then
+        echo 1
+        return
+    fi
+
+    image_count=$($JQ_CMD -r '[.images[]? | .original.url | select(. != null and . != "")] | length' "$source_json" 2>/dev/null)
+    if [[ ! "$image_count" =~ ^[0-9]+$ ]]; then
+        image_count=0
+    fi
+
+    model_dir=$(resolve_model_dir "$model_id" "$source_json")
+    if model_assets_already_archived "$model_dir" "$source_json" "$model_id"; then
+        echo $((image_count + 3))
+        return
+    fi
+
+    echo $((downloadable_count + image_count + 3))
+}
+
 write_compact_model_json() {
     local source_json="$1"
     local model_dir="$2"
@@ -649,6 +749,7 @@ write_compact_model_json() {
 download_model_images() {
     local source_json="$1"
     local model_dir="$2"
+    local model_id="$3"
 
     local image_data
     image_data=$($JQ_CMD -r '.images[]? | "\((.is_primary // false) | tostring)|\(.original.url // "")"' "$source_json" 2>/dev/null)
@@ -699,6 +800,7 @@ download_model_images() {
             existing_image_size=$(get_file_size "$canonical_image_path")
             echo -e "  ${GREEN}[SKIP] Image already downloaded: $(basename "$canonical_image_path") (${existing_image_size} bytes)${NC}"
             successful_downloads=$((successful_downloads + 1))
+            emit_asset_progress_unit "$model_id" "image" "skipped"
             continue
         fi
 
@@ -717,9 +819,11 @@ download_model_images() {
             image_size=$(get_file_size "$output_path")
             echo -e "  ${GREEN}[OK] Downloaded image $(basename "$output_path") (${image_size} bytes)${NC}"
             successful_downloads=$((successful_downloads + 1))
+            emit_asset_progress_unit "$model_id" "image" "downloaded"
         else
             if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                 rm -f "$output_path" "${output_path}.part"
+                emit_asset_progress_unit "$model_id" "image" "failed"
                 abort_no_space "downloading image $(basename "$output_path")"
             fi
 
@@ -735,6 +839,7 @@ download_model_images() {
             fi
 
             rm -f "$output_path"
+            emit_asset_progress_unit "$model_id" "image" "failed"
         fi
 
         sleep "$IMAGE_DELAY_SEC"
@@ -866,15 +971,34 @@ mkdir -p stl_files
 cd stl_files || exit
 cleanup_orphan_part_files
 
-# Count JSON files
-json_count=$(find .. -name "model_*.json" -type f 2>/dev/null | wc -l)
+load_model_ids_filter
+
+# Count JSON files selected for this run.
+shopt -s nullglob
+model_json_files=()
+for json_candidate in ../model_*.json; do
+    json_model_id=$(basename "$json_candidate" | sed 's/model_//; s/.json//')
+    if is_model_id_selected "$json_model_id"; then
+        model_json_files+=("$json_candidate")
+    fi
+done
+shopt -u nullglob
+
+json_count=${#model_json_files[@]}
 
 if [[ $json_count -eq 0 ]]; then
-    echo -e "${RED}Error: No JSON files found${NC}"
+    if [[ "$MODEL_IDS_FILTER_ACTIVE" -eq 1 ]]; then
+        echo -e "${RED}Error: No model JSON files matched the selected batch. Run Step 1 for this batch first.${NC}"
+    else
+        echo -e "${RED}Error: No JSON files found${NC}"
+    fi
     exit 1
 fi
 
 echo -e "${BLUE}Found $json_count JSON files to process${NC}"
+if [[ "$MODEL_IDS_FILTER_ACTIVE" -eq 1 ]]; then
+    echo -e "${BLUE}Batch filter active: processing only the selected model IDs${NC}"
+fi
 echo -e "${BLUE}Output folders: $FOLDER_NAMING_FORMAT (readable names; legacy model_<id> still supported)${NC}"
 echo -e "${CYAN}Minimum free space required before each write: ${MIN_FREE_SPACE_MB} MB${NC}"
 
@@ -888,10 +1012,11 @@ if [[ "$TEST_MODE" == true ]]; then
     echo -e "${YELLOW}   RUNNING IN TEST MODE${NC}"
     echo -e "${YELLOW}=======================================${NC}"
     echo "Testing with first available model to verify cookie and setup..."
+    emit_progress_event "{\"step\":\"test\",\"event\":\"start\"}"
     echo ""
     
     # Find first JSON file with download URLs
-    for json_file in ../model_*.json; do
+    for json_file in "${model_json_files[@]}"; do
         model_id=$(basename "$json_file" | sed 's/model_//; s/.json//')
         test_line=$($JQ_CMD -r '.files.items[]? | select(.download_url != null and .download_url != "") | "\(.filename // "")|\(.download_url)"' "$json_file" 2>/dev/null | head -1)
 
@@ -921,11 +1046,13 @@ if [[ "$TEST_MODE" == true ]]; then
                 echo -e "${GREEN}Cookie is working! You can now run the full download:${NC}"
                 echo "  bash $(basename "$0")"
                 rm -f "$test_file"
+                emit_progress_event "{\"step\":\"test\",\"event\":\"done\"}"
                 exit 0
             fi
 
             if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                 rm -f "$test_file" "${test_file}.part"
+                emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
                 abort_no_space "running test mode download"
             fi
 
@@ -954,6 +1081,7 @@ if [[ "$TEST_MODE" == true ]]; then
             fi
 
             rm -f "$test_file" "${test_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
+            emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
             exit 1
         else
             is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
@@ -965,6 +1093,7 @@ if [[ "$TEST_MODE" == true ]]; then
     
     echo -e "${RED}No downloadable files found for testing${NC}"
     echo -e "${YELLOW}If the listed models are not owned, this is expected. Use owned models for --test.${NC}"
+    emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
     exit 1
 fi
 
@@ -984,11 +1113,27 @@ models_zip_skipped=0
 not_owned_skipped=0
 models_without_file_downloads=0
 
+ASSET_PROGRESS_TOTAL_UNITS=0
+ASSET_PROGRESS_DONE_UNITS=0
+ASSET_PROGRESS_MODELS_DONE=0
+for json_file in "${model_json_files[@]}"; do
+    model_id_for_count=$(basename "$json_file" | sed 's/model_//; s/.json//')
+    model_units=$(count_model_progress_units "$json_file" "$model_id_for_count")
+    if [[ "$model_units" =~ ^[0-9]+$ ]]; then
+        ASSET_PROGRESS_TOTAL_UNITS=$((ASSET_PROGRESS_TOTAL_UNITS + model_units))
+    fi
+done
+if [[ "$ASSET_PROGRESS_TOTAL_UNITS" -eq 0 ]]; then
+    ASSET_PROGRESS_TOTAL_UNITS="$json_count"
+fi
+emit_asset_progress_start "$json_count" "$ASSET_PROGRESS_TOTAL_UNITS"
+
 # Process each JSON file
-for json_file in ../model_*.json; do
+for json_file in "${model_json_files[@]}"; do
     current_file=$((current_file + 1))
     model_id=$(basename "$json_file" | sed 's/model_//; s/.json//')
 
+    emit_asset_progress_model_start "$model_id" "$current_file" "$json_count"
     echo -e "${BLUE}[$current_file/$json_count] Processing model $model_id...${NC}"
 
     is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
@@ -1008,6 +1153,8 @@ for json_file in ../model_*.json; do
             models_without_file_downloads=$((models_without_file_downloads + 1))
             echo -e "${YELLOW}  ! No downloadable STL/ZIP URLs found in metadata. Skipping model output.${NC}"
         fi
+        emit_asset_progress_unit "$model_id" "model" "skipped"
+        emit_asset_progress_model_done "$model_id"
         echo ""
         continue
     fi
@@ -1039,6 +1186,8 @@ for json_file in ../model_*.json; do
         echo -e "${YELLOW}  ! No STL/ZIP file URLs found in metadata. Skipping model output.${NC}"
         rm -rf "$model_dir"
         models_without_file_downloads=$((models_without_file_downloads + 1))
+        emit_asset_progress_unit "$model_id" "model" "skipped"
+        emit_asset_progress_model_done "$model_id"
         echo ""
         continue
     elif [[ "$model_assets_complete" -eq 0 ]]; then
@@ -1064,6 +1213,7 @@ for json_file in ../model_*.json; do
                 successful_downloads=$((successful_downloads + 1))
                 model_file_successful_downloads=$((model_file_successful_downloads + 1))
                 consecutive_failures=0
+                emit_asset_progress_unit "$model_id" "file" "skipped"
                 continue
             fi
 
@@ -1084,9 +1234,11 @@ for json_file in ../model_*.json; do
                 successful_downloads=$((successful_downloads + 1))
                 model_file_successful_downloads=$((model_file_successful_downloads + 1))
                 consecutive_failures=0
+                emit_asset_progress_unit "$model_id" "file" "downloaded"
             else
                 if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                     rm -f "$output_file" "${output_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
+                    emit_asset_progress_unit "$model_id" "file" "failed"
                     abort_no_space "downloading file $(basename "$output_file")"
                 fi
 
@@ -1108,6 +1260,7 @@ for json_file in ../model_*.json; do
 
                 consecutive_failures=$((consecutive_failures + 1))
                 rm -f "$output_file" "${output_file}.part"
+                emit_asset_progress_unit "$model_id" "file" "failed"
 
                 if [[ $consecutive_failures -ge $MAX_CONSECUTIVE_FAILURES ]]; then
                     echo ""
@@ -1141,6 +1294,8 @@ for json_file in ../model_*.json; do
         echo -e "${YELLOW}  ! No files could be downloaded for model $model_id. Removing metadata/images output for copyright compliance.${NC}"
         rm -rf "$model_dir"
         models_without_file_downloads=$((models_without_file_downloads + 1))
+        emit_asset_progress_unit "$model_id" "model" "failed"
+        emit_asset_progress_model_done "$model_id"
         echo ""
         continue
     fi
@@ -1148,20 +1303,31 @@ for json_file in ../model_*.json; do
     # Build compact JSON only when at least one STL/ZIP file was downloaded.
     if write_compact_model_json "$json_file" "$model_dir" "$model_id"; then
         compact_json_written=$((compact_json_written + 1))
+        emit_asset_progress_unit "$model_id" "json" "written"
+    else
+        emit_asset_progress_unit "$model_id" "json" "failed"
     fi
 
     # Download images only when the model has at least one successfully downloaded file.
-    download_model_images "$json_file" "$model_dir"
+    download_model_images "$json_file" "$model_dir" "$model_id"
 
     # Compress only model root files to a zip archive; images stay in model_<id>/images
     if [[ "$model_assets_complete" -eq 1 ]]; then
         zip_created=$((zip_created + 1))
+        emit_asset_progress_unit "$model_id" "zip" "skipped"
     elif compress_non_json_assets "$model_dir" "$json_file" "$model_id"; then
         zip_created=$((zip_created + 1))
+        emit_asset_progress_unit "$model_id" "zip" "created"
+    else
+        emit_asset_progress_unit "$model_id" "zip" "failed"
     fi
 
+    emit_asset_progress_unit "$model_id" "model" "completed"
+    emit_asset_progress_model_done "$model_id"
     echo ""
 done
+
+emit_progress_event "{\"step\":\"assets\",\"event\":\"done\",\"totalModels\":$json_count,\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_TOTAL_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
 
 echo -e "${GREEN}=======================================${NC}"
 echo -e "${GREEN}   Download Complete!${NC}"

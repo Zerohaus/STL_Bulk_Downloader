@@ -178,7 +178,7 @@
                     <span id="modelListTotalInfo" class="model-list-total-info"></span>
                 </nav>
                 <textarea id="idsInput" class="hidden" tabindex="-1" aria-hidden="true"></textarea>
-                <p class="hint catalog-load-hint">All modes use objectPreviews. Large libraries are processed in chunks; the list shows 10 rows per page.</p>
+                <p class="hint catalog-load-hint">All modes use objectPreviews. Large libraries are processed in chunks; the list shows 20 rows per page.</p>
 
                 <details class="category-section" id="categorySectionPanel" open>
                     <summary id="categorySelectionHeading" class="subheading">Categories and subcategories</summary>
@@ -291,7 +291,7 @@
                     <span id="pipelineProgressLabel" class="pipeline-progress-label">Pipeline progress</span>
                     <span id="pipelineProgressPercent" class="pipeline-progress-percent">0%</span>
                 </div>
-                <div class="progress-track pipeline-progress-track" aria-hidden="true">
+                <div class="progress-track pipeline-progress-track" role="progressbar" aria-label="Pipeline progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                     <div id="pipelineProgressBar" class="progress-bar"></div>
                 </div>
                 <p id="pipelineProgressDetail" class="hint pipeline-progress-detail"></p>
