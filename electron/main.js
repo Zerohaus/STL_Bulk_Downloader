@@ -259,7 +259,7 @@ function sanitizeCategorySelection(rawSelection) {
         .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-const BATCH_SIZE_SELECTION_VALUES = ["25", "50", "100", "all"];
+const BATCH_SIZE_SELECTION_VALUES = ["10", "25", "50", "100", "all"];
 const BATCH_STATUS_VALUES = ["idle", "running", "completed", "failed", "interrupted"];
 
 function sanitizeNumericIdList(rawIds) {
@@ -1478,13 +1478,18 @@ function getAllowedOpenPathRoots(rawConfig) {
     const saved = loadSettingsFromDisk();
     const config = rawConfig && typeof rawConfig === "object" ? rawConfig : {};
 
+    const historyFromConfig = sanitizeDownloadRootHistory(config.downloadRootHistory);
+    const historyFromSaved = sanitizeDownloadRootHistory(saved.downloadRootHistory);
+
     const candidatePaths = [
         runtime.downloadsPath,
         runtime.stlFilesPath,
         cleanInputPath(config.downloadRoot || saved.downloadRoot),
         cleanInputPath(config.basePath || saved.basePath),
         cleanInputPath(config.jsonPath || saved.jsonPath),
-        cleanInputPath(config.foldersPath || saved.foldersPath)
+        cleanInputPath(config.foldersPath || saved.foldersPath),
+        ...historyFromConfig,
+        ...historyFromSaved
     ].filter(Boolean);
 
     return [...new Set(candidatePaths.map((entry) => path.resolve(entry)))];

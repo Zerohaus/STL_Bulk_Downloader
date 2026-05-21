@@ -155,6 +155,7 @@
                     <div>
                         <label for="batchSizeSelect">Batch size</label>
                         <select id="batchSizeSelect">
+                            <option value="10">10 models</option>
                             <option value="25">25 models</option>
                             <option value="50">50 models</option>
                             <option value="100">100 models</option>
@@ -177,7 +178,7 @@
                     <span id="modelListTotalInfo" class="model-list-total-info"></span>
                 </nav>
                 <textarea id="idsInput" class="hidden" tabindex="-1" aria-hidden="true"></textarea>
-                <p class="hint catalog-load-hint">All modes use objectPreviews. Large libraries are processed in chunks; the list shows 25 rows per page.</p>
+                <p class="hint catalog-load-hint">All modes use objectPreviews. Large libraries are processed in chunks; the list shows 10 rows per page.</p>
 
                 <details class="category-section" id="categorySectionPanel" open>
                     <summary id="categorySelectionHeading" class="subheading">Categories and subcategories</summary>
@@ -283,6 +284,17 @@
                 <button id="runStep3Btn" type="button" class="btn btn-secondary hidden">Run Step 3</button>
                 <button id="runStep4Btn" type="button" class="btn btn-secondary hidden">Run Step 4</button>
                 <button id="stopRunBtn" type="button" class="btn btn-danger" disabled>Stop active run</button>
+            </div>
+
+            <div id="pipelineProgressPanel" class="pipeline-progress-panel hidden" aria-live="polite">
+                <div class="pipeline-progress-head">
+                    <span id="pipelineProgressLabel" class="pipeline-progress-label">Pipeline progress</span>
+                    <span id="pipelineProgressPercent" class="pipeline-progress-percent">0%</span>
+                </div>
+                <div class="progress-track pipeline-progress-track" aria-hidden="true">
+                    <div id="pipelineProgressBar" class="progress-bar"></div>
+                </div>
+                <p id="pipelineProgressDetail" class="hint pipeline-progress-detail"></p>
             </div>
 
             <div class="button-row">

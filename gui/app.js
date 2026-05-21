@@ -87,6 +87,11 @@ const elements = {
     clearLogBtn: document.getElementById("clearLogBtn"),
     openFilesFolderBtn: document.getElementById("openFilesFolderBtn"),
     runStatus: document.getElementById("runStatus"),
+    pipelineProgressPanel: document.getElementById("pipelineProgressPanel"),
+    pipelineProgressLabel: document.getElementById("pipelineProgressLabel"),
+    pipelineProgressPercent: document.getElementById("pipelineProgressPercent"),
+    pipelineProgressBar: document.getElementById("pipelineProgressBar"),
+    pipelineProgressDetail: document.getElementById("pipelineProgressDetail"),
     runLog: document.getElementById("runLog"),
     jsonFileSelect: document.getElementById("jsonFileSelect"),
     refreshJsonListBtn: document.getElementById("refreshJsonListBtn"),
@@ -121,9 +126,9 @@ let runtimeInfoCache = null;
 let modelIdEntries = [];
 let categoryTaxonomyItems = [];
 let categorySelectionMap = new Map();
-const MODEL_LIST_UI_PAGE_SIZE = 25;
+const MODEL_LIST_UI_PAGE_SIZE = 10;
 const CATALOG_LOAD_MODES = ["listing", "library", "creator"];
-const BATCH_SIZE_OPTIONS = ["25", "50", "100", "all"];
+const BATCH_SIZE_OPTIONS = ["10", "25", "50", "100", "all"];
 const BATCH_STATUS_OPTIONS = ["idle", "running", "completed", "failed", "interrupted"];
 const DOWNLOAD_HISTORY_LIMIT = 20;
 let modelListUiPage = 1;
@@ -132,6 +137,23 @@ let downloadRootHistory = [];
 let lastStableDownloadRoot = "";
 let batchProgressState = createDefaultBatchProgressState();
 let activeBatchPlan = null;
+const sessionPipelineCompletedIds = new Set();
+let pipelineProgressState = createDefaultPipelineProgressState();
+
+function createDefaultPipelineProgressState() {
+    return {
+        visible: false,
+        phase: "idle",
+        percent: 0,
+        label: "",
+        detail: "",
+        metadataTotal: 0,
+        metadataDone: 0,
+        batchTotal: 0,
+        batchModelsDone: 0,
+        step2CurrentModelId: ""
+    };
+}
 
 function createDefaultBatchProgressState() {
     return {
@@ -816,6 +838,7 @@ function reconcileBatchProgressWithCurrentIds() {
     }
 
     updateBatchStatusUi();
+    renderModelIdList();
     renderDownloadRootHistory();
 }
 
@@ -918,8 +941,301 @@ function rememberDownloadRoot(pathValue, options = {}) {
     }
 }
 
+function removeDownloadRootFromHistory(pathValue, options = {}) {
+    const normalizedPath = String(pathValue || "").trim();
+    if (!normalizedPath) {
+        return false;
+    }
+
+    const isLikelyWindowsPath = /^[a-z]:\\/i.test(normalizedPath) || normalizedPath.includes("\\");
+    const caseSensitive = !(runtimePlatform === "win32" || isLikelyWindowsPath);
+    const beforeCount = sanitizeDownloadRootHistory(downloadRootHistory).length;
+
+    downloadRootHistory = sanitizeDownloadRootHistory(downloadRootHistory)
+        .filter((entry) => {
+            if (caseSensitive) {
+                return entry !== normalizedPath;
+            }
+
+            return entry.toLowerCase() !== normalizedPath.toLowerCase();
+        });
+
+    const removed = beforeCount !== downloadRootHistory.length;
+    if (removed) {
+        renderDownloadRootHistory();
+        if (options.save !== false) {
+            scheduleSettingsSave();
+        }
+    }
+
+    return removed;
+}
+
 function isDownloadRootLocked() {
     return Boolean(activeRunId) || pipelineRunning || batchProgressState.inProgress;
+}
+
+function isModelListMutationLocked() {
+    return isDownloadRootLocked();
+}
+
+function getModelEntryLabelById(modelId) {
+    const entry = modelIdEntries.find((item) => item && item.id === modelId);
+    if (!entry) {
+        return modelId;
+    }
+
+    return entry.name ? `${entry.name} (${modelId})` : modelId;
+}
+
+function getPipelineBatchIdSet() {
+    if (activeBatchPlan && Array.isArray(activeBatchPlan.ids)) {
+        return new Set(sanitizeNumericIdList(activeBatchPlan.ids));
+    }
+
+    if (batchProgressState.inProgress) {
+        return new Set(sanitizeNumericIdList(batchProgressState.inProgressIds));
+    }
+
+    return new Set();
+}
+
+function isModelRowCompletedForDisplay(modelId) {
+    return getCompletedModelIdSet().has(modelId) || sessionPipelineCompletedIds.has(modelId);
+}
+
+function stripAnsiFromLogLine(text) {
+    return String(text || "").replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function resetPipelineProgressUi() {
+    pipelineProgressState = createDefaultPipelineProgressState();
+    sessionPipelineCompletedIds.clear();
+    renderPipelineProgressUi();
+}
+
+function beginPipelineProgressUi(batchPlan, options = {}) {
+    const batchIds = sanitizeNumericIdList(batchPlan && batchPlan.ids ? batchPlan.ids : []);
+    sessionPipelineCompletedIds.clear();
+    pipelineProgressState = {
+        visible: true,
+        phase: options.phase || "starting",
+        percent: 0,
+        label: "Preparing pipeline…",
+        detail: batchIds.length > 0
+            ? `Batch of ${batchIds.length} model(s). Metadata download starts next.`
+            : "Waiting for workflow output…",
+        metadataTotal: batchIds.length,
+        metadataDone: 0,
+        batchTotal: batchIds.length,
+        batchModelsDone: 0,
+        step2CurrentModelId: ""
+    };
+    renderPipelineProgressUi();
+}
+
+function setPipelineProgressPhase(phase, label, detail) {
+    pipelineProgressState.visible = true;
+    pipelineProgressState.phase = phase;
+    if (label) {
+        pipelineProgressState.label = label;
+    }
+    if (detail) {
+        pipelineProgressState.detail = detail;
+    }
+    renderPipelineProgressUi();
+}
+
+function computePipelineProgressPercent() {
+    const { phase, metadataTotal, metadataDone, batchTotal, batchModelsDone } = pipelineProgressState;
+
+    if (phase === "metadata") {
+        if (metadataTotal > 0) {
+            return Math.min(100, Math.round((metadataDone / metadataTotal) * 28));
+        }
+
+        return 4;
+    }
+
+    if (phase === "step2-test") {
+        return 32;
+    }
+
+    if (phase === "step2-full") {
+        if (batchTotal > 0) {
+            return Math.min(100, 30 + Math.round((batchModelsDone / batchTotal) * 68));
+        }
+
+        return 40;
+    }
+
+    if (phase === "done") {
+        return 100;
+    }
+
+    if (phase === "failed" || phase === "interrupted") {
+        return pipelineProgressState.percent;
+    }
+
+    return pipelineProgressState.percent;
+}
+
+function renderPipelineProgressUi() {
+    if (!elements.pipelineProgressPanel) {
+        return;
+    }
+
+    if (!pipelineProgressState.visible) {
+        elements.pipelineProgressPanel.classList.add("hidden");
+        return;
+    }
+
+    elements.pipelineProgressPanel.classList.remove("hidden");
+    pipelineProgressState.percent = computePipelineProgressPercent();
+
+    if (elements.pipelineProgressLabel) {
+        elements.pipelineProgressLabel.textContent = pipelineProgressState.label || "Pipeline progress";
+    }
+
+    if (elements.pipelineProgressPercent) {
+        elements.pipelineProgressPercent.textContent = `${pipelineProgressState.percent}%`;
+    }
+
+    if (elements.pipelineProgressBar) {
+        elements.pipelineProgressBar.style.width = `${pipelineProgressState.percent}%`;
+    }
+
+    if (elements.pipelineProgressDetail) {
+        elements.pipelineProgressDetail.textContent = pipelineProgressState.detail || "";
+    }
+}
+
+function markPipelineBatchModelDone(modelId) {
+    const normalizedId = String(modelId || "").trim();
+    const batchIds = getPipelineBatchIdSet();
+    if (!/^\d+$/.test(normalizedId) || (batchIds.size > 0 && !batchIds.has(normalizedId))) {
+        return;
+    }
+
+    if (sessionPipelineCompletedIds.has(normalizedId)) {
+        return;
+    }
+
+    sessionPipelineCompletedIds.add(normalizedId);
+    pipelineProgressState.batchModelsDone = sessionPipelineCompletedIds.size;
+    pipelineProgressState.label = "Downloading and packaging models";
+    pipelineProgressState.detail = batchIds.size > 0
+        ? `Model ${sessionPipelineCompletedIds.size}/${batchIds.size} finished (ZIP ready): ${getModelEntryLabelById(normalizedId)}`
+        : `Model finished (ZIP ready): ${getModelEntryLabelById(normalizedId)}`;
+    renderPipelineProgressUi();
+    renderModelIdList();
+}
+
+function feedPipelineProgressFromLog(text) {
+    if (!pipelineProgressState.visible || !text) {
+        return;
+    }
+
+    const lines = String(text).split(/\r?\n/);
+    lines.forEach((rawLine) => {
+        const line = stripAnsiFromLogLine(rawLine).trim();
+        if (!line) {
+            return;
+        }
+
+        const metadataTotalMatch = line.match(/Starting download of (\d+) model metadata/i);
+        if (metadataTotalMatch) {
+            pipelineProgressState.metadataTotal = Number.parseInt(metadataTotalMatch[1], 10) || pipelineProgressState.metadataTotal;
+            pipelineProgressState.phase = "metadata";
+            pipelineProgressState.label = "Downloading JSON metadata";
+            pipelineProgressState.detail = `Preparing ${pipelineProgressState.metadataTotal} metadata file(s)…`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        const metadataProgressMatch = line.match(/\[(\d+)\/(\d+)\].*model\s+(\d+)/i);
+        if (metadataProgressMatch) {
+            const current = Number.parseInt(metadataProgressMatch[1], 10);
+            const total = Number.parseInt(metadataProgressMatch[2], 10);
+            const modelId = metadataProgressMatch[3];
+            const isSkip = /Skipping model/i.test(line);
+            pipelineProgressState.phase = "metadata";
+            pipelineProgressState.metadataTotal = total || pipelineProgressState.metadataTotal;
+            pipelineProgressState.metadataDone = Number.isNaN(current) ? pipelineProgressState.metadataDone : current;
+            pipelineProgressState.label = "Downloading JSON metadata";
+            pipelineProgressState.detail = isSkip
+                ? `Metadata ${pipelineProgressState.metadataDone}/${pipelineProgressState.metadataTotal} — skipped (already exists): ${getModelEntryLabelById(modelId)}`
+                : `Metadata ${pipelineProgressState.metadataDone}/${pipelineProgressState.metadataTotal} — model ${getModelEntryLabelById(modelId)}`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        const metadataSavedMatch = line.match(/Successfully downloaded metadata for model\s+(\d+)/i);
+        if (metadataSavedMatch) {
+            const modelId = metadataSavedMatch[1];
+            const total = pipelineProgressState.metadataTotal || pipelineProgressState.batchTotal;
+            pipelineProgressState.metadataDone = Math.min(
+                total || pipelineProgressState.metadataDone + 1,
+                (pipelineProgressState.metadataDone || 0) + 1
+            );
+            pipelineProgressState.phase = "metadata";
+            pipelineProgressState.label = "Downloading JSON metadata";
+            pipelineProgressState.detail = `Saved metadata for ${getModelEntryLabelById(modelId)} (${pipelineProgressState.metadataDone}/${total || "?"})`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        const jsonCountMatch = line.match(/Found (\d+) JSON files to process/i);
+        if (jsonCountMatch) {
+            pipelineProgressState.phase = "step2-full";
+            pipelineProgressState.label = "Downloading models (STL/ZIP)";
+            pipelineProgressState.detail = `Scanning ${jsonCountMatch[1]} metadata file(s) in the download folder.`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        const processingMatch = line.match(/\[(\d+)\/(\d+)\]\s+Processing model\s+(\d+)/i);
+        if (processingMatch) {
+            const modelId = processingMatch[3];
+            if (pipelineProgressState.step2CurrentModelId
+                && pipelineProgressState.step2CurrentModelId !== modelId) {
+                markPipelineBatchModelDone(pipelineProgressState.step2CurrentModelId);
+            }
+
+            pipelineProgressState.phase = "step2-full";
+            pipelineProgressState.step2CurrentModelId = modelId;
+            pipelineProgressState.label = "Downloading and packaging models";
+            const batchIds = getPipelineBatchIdSet();
+            const inBatch = batchIds.size === 0 || batchIds.has(modelId);
+            const batchPosition = inBatch && batchIds.size > 0
+                ? `${sessionPipelineCompletedIds.size + 1}/${batchIds.size}`
+                : `${processingMatch[1]}/${processingMatch[2]}`;
+            pipelineProgressState.detail = inBatch
+                ? `Working on batch model ${batchPosition}: ${getModelEntryLabelById(modelId)} (files + ZIP)`
+                : `Processing ${processingMatch[1]}/${processingMatch[2]}: ${getModelEntryLabelById(modelId)}`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        if (/\[OK\]\s+Created .+\.zip/i.test(line) || /\[SKIP\]\s+Model assets already archived/i.test(line)) {
+            if (pipelineProgressState.step2CurrentModelId) {
+                markPipelineBatchModelDone(pipelineProgressState.step2CurrentModelId);
+            }
+            return;
+        }
+
+        if (/Download Complete!/i.test(line)) {
+            if (pipelineProgressState.step2CurrentModelId) {
+                markPipelineBatchModelDone(pipelineProgressState.step2CurrentModelId);
+                pipelineProgressState.step2CurrentModelId = "";
+            }
+
+            pipelineProgressState.phase = "step2-full";
+            pipelineProgressState.label = "Step 2 finished";
+            pipelineProgressState.detail = "All model folders processed for this run.";
+            renderPipelineProgressUi();
+        }
+    });
 }
 
 function unlockModelSearchControls() {
@@ -1070,7 +1386,7 @@ function renderModelIdList() {
         return;
     }
 
-    const completedIds = getCompletedModelIdSet();
+    const listLocked = isModelListMutationLocked();
 
     const pageStart = (modelListUiPage - 1) * MODEL_LIST_UI_PAGE_SIZE;
     const pageEntries = filteredRows.slice(pageStart, pageStart + MODEL_LIST_UI_PAGE_SIZE);
@@ -1081,7 +1397,7 @@ function renderModelIdList() {
 
         const isNumeric = /^\d+$/.test(entry.id);
         const isDuplicate = (countById.get(entry.id) || 0) > 1;
-        const isCompleted = completedIds.has(entry.id);
+        const isCompleted = isModelRowCompletedForDisplay(entry.id);
 
         if (!isNumeric) {
             row.classList.add("model-id-row-invalid");
@@ -1131,6 +1447,10 @@ function renderModelIdList() {
         removeBtn.textContent = "Remove";
         removeBtn.dataset.rowIndex = String(index);
         removeBtn.setAttribute("aria-label", `Remove model ${entry.name || entry.id}`);
+        removeBtn.disabled = listLocked;
+        if (listLocked) {
+            removeBtn.title = "Cannot remove models while a pipeline is running.";
+        }
 
         row.appendChild(idCell);
         row.appendChild(nameCell);
@@ -1231,6 +1551,11 @@ function setupModelIdList() {
 
         const removeBtn = target.closest(".model-id-row-remove");
         if (!removeBtn) {
+            return;
+        }
+
+        if (isModelListMutationLocked()) {
+            setStatus("Cannot remove models while a pipeline is running.", "warn");
             return;
         }
 
@@ -1844,6 +2169,7 @@ function setRunButtonsState() {
     }
 
     unlockModelSearchControls();
+    renderModelIdList();
 
     elements.stopRunBtn.disabled = !running;
 }
@@ -1852,6 +2178,8 @@ function appendRunLog(text, stream = "stdout") {
     if (!text) {
         return;
     }
+
+    feedPipelineProgressFromLog(text);
 
     const existing = elements.runLog.textContent === "Run log will appear here." ? "" : elements.runLog.textContent;
     const prefix = stream === "stderr" ? "[stderr] " : "";
@@ -2208,7 +2536,7 @@ function getActiveStlFilesPath() {
     return "";
 }
 
-async function openPathFromUi(pathValue, label) {
+async function openPathFromUi(pathValue, label, options = {}) {
     const targetPath = (pathValue || "").trim();
     if (!targetPath) {
         setStatus(`${label} is empty. Select a folder first.`, "warn");
@@ -2230,7 +2558,26 @@ async function openPathFromUi(pathValue, label) {
             return;
         }
 
-        setStatus(result && result.message ? result.message : `Failed to open ${label}.`, "bad");
+        const message = result && result.message ? result.message : `Failed to open ${label}.`;
+        const pathMissing = /^Path does not exist:/i.test(message);
+        if (pathMissing && options.removeFromHistoryOnMissing !== false) {
+            const removed = removeDownloadRootFromHistory(targetPath);
+            if (removed) {
+                setStatus(`${message} Removed from saved download folders.`, "warn");
+                return;
+            }
+        }
+
+        const pathOutsideWorkspace = /outside the allowed download workspace/i.test(message);
+        if (pathOutsideWorkspace) {
+            setStatus(
+                `${message} Set that folder as "Download folder" first, or pick it with Browse — saved folders in history should open after a restart.`,
+                "warn"
+            );
+            return;
+        }
+
+        setStatus(message, "bad");
     } catch (err) {
         setStatus(`Failed to open ${label}: ${String(err?.message || err)}`, "bad");
     }
@@ -2731,6 +3078,7 @@ function beginBatchPipeline(plan) {
 
     updateBatchStatusUi();
     setRunButtonsState();
+    beginPipelineProgressUi(plan, { phase: "starting" });
 }
 
 function finalizeBatchPipelineSuccess() {
@@ -2751,8 +3099,15 @@ function finalizeBatchPipelineSuccess() {
     }
 
     activeBatchPlan = null;
+    sessionPipelineCompletedIds.clear();
     reconcileBatchProgressWithCurrentIds();
     updateBatchStatusUi();
+    renderModelIdList();
+    pipelineProgressState.phase = "done";
+    pipelineProgressState.label = "Batch completed";
+    pipelineProgressState.detail = "All pipeline steps finished for this batch.";
+    pipelineProgressState.percent = 100;
+    renderPipelineProgressUi();
     scheduleSettingsSave();
 }
 
@@ -2766,6 +3121,12 @@ function finalizeBatchPipelineFailure(message, status = "failed") {
     batchProgressState.lastStatus = BATCH_STATUS_OPTIONS.includes(status) ? status : "failed";
     batchProgressState.lastError = String(message || "Pipeline did not complete.");
     activeBatchPlan = null;
+    sessionPipelineCompletedIds.clear();
+    pipelineProgressState.phase = status === "interrupted" ? "interrupted" : "failed";
+    pipelineProgressState.label = status === "interrupted" ? "Pipeline interrupted" : "Pipeline failed";
+    pipelineProgressState.detail = String(message || "Pipeline did not complete.");
+    renderPipelineProgressUi();
+    renderModelIdList();
 
     updateBatchStatusUi();
     scheduleSettingsSave();
@@ -2829,7 +3190,6 @@ async function executePipeline() {
 
     pipelineRunning = true;
     beginBatchPipeline(batchPlan);
-    setRunButtonsState();
     await saveSettingsNow();
 
     const runTestStep = elements.testModeCheck.checked;
@@ -2850,6 +3210,7 @@ async function executePipeline() {
         finalizeBatchPipelineFailure("Session expired before pipeline start.", "failed");
         pipelineRunning = false;
         setRunButtonsState();
+        resetPipelineProgressUi();
         return;
     }
 
@@ -2857,6 +3218,26 @@ async function executePipeline() {
 
     try {
         for (const step of pipelineSteps) {
+            if (step.key === "step1") {
+                setPipelineProgressPhase(
+                    "metadata",
+                    "Downloading JSON metadata",
+                    `Fetching metadata for ${batchPlan.ids.length} model(s) in this batch…`
+                );
+            } else if (step.key === "step2-test") {
+                setPipelineProgressPhase(
+                    "step2-test",
+                    "Step 2 test run",
+                    "Validating cookie with a single test download…"
+                );
+            } else if (step.key === "step2-full") {
+                setPipelineProgressPhase(
+                    "step2-full",
+                    "Downloading and packaging models",
+                    `Processing batch models (0/${batchPlan.ids.length} ZIP-ready)…`
+                );
+            }
+
             const startResult = await startWorkflowStep(step.key, step.label, {
                 silent: true,
                 configOverride: step.key === "step1"
@@ -2921,6 +3302,9 @@ async function executePipeline() {
     } finally {
         pipelineRunning = false;
         setRunButtonsState();
+        if (!batchProgressState.inProgress && pipelineProgressState.visible && pipelineProgressState.phase !== "done") {
+            resetPipelineProgressUi();
+        }
     }
 }
 

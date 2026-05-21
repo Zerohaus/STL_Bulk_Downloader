@@ -620,10 +620,14 @@ select:focus {
 }
 
 .model-id-list {
+    --model-id-row-height: 56px;
+    --model-id-list-visible-rows: 5;
     list-style: none;
     margin: 0 0 8px;
     padding: 0;
-    min-height: 120px;
+    min-height: 0;
+    max-height: calc(var(--model-id-list-visible-rows) * var(--model-id-row-height));
+    overflow-y: auto;
     border: 1px solid var(--edge);
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.72);
@@ -745,7 +749,12 @@ select:focus {
     cursor: pointer;
 }
 
-.model-id-row-remove:hover {
+.model-id-row-remove:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.model-id-row-remove:not(:disabled):hover {
     color: var(--bad);
     border-color: rgba(191, 47, 47, 0.35);
 }
@@ -935,6 +944,48 @@ select:focus {
     border-radius: 999px;
     background: linear-gradient(90deg, var(--accent), var(--accent-warm));
     transition: width 220ms ease;
+}
+
+.pipeline-progress-panel {
+    margin: 12px 0 4px;
+    padding: 12px 14px;
+    border: 1px solid rgba(15, 118, 110, 0.22);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.82);
+}
+
+.pipeline-progress-panel.hidden {
+    display: none;
+}
+
+.pipeline-progress-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.pipeline-progress-label {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--ink);
+}
+
+.pipeline-progress-percent {
+    font-family: "IBM Plex Mono", "Consolas", monospace;
+    font-size: 0.86rem;
+    font-weight: 700;
+    color: #0b4f4a;
+}
+
+.pipeline-progress-track {
+    margin-top: 0;
+    height: 14px;
+}
+
+.pipeline-progress-detail {
+    margin: 8px 0 0;
 }
 
 .preview {
