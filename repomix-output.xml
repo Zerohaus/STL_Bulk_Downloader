@@ -115339,80 +115339,6 @@ Get-ChildItem -Directory | Select-Object -First 5 | ForEach-Object {
 # - STL files are typically in the extracted folders, ready for slicing software
 </file>
 
-<file path="CHANGELOG.md">
-# Changelog
-
-## [1.3.0] — 2026-05-20
-
-### Added
-- New **Creator** catalog mode with creator ID filter in the desktop UI and backend catalog resolution.
-- Creator metadata propagation end-to-end (`creatorId`, `creatorName`, `creatorUsername`) and rendering in model list rows.
-- Category taxonomy support from `gui/categories-taxonomy.json` with category + subcategory multi-select rules.
-- Category selection summary in the UI and export of selected categories into compact model JSON.
-- Collapsible categories/subcategories section to reduce scroll fatigue.
-- Download hardening in Step 1 and Step 2: atomic `.part` writes, proactive free-space checks, and explicit `curl` write-error handling.
-- ZIP integrity validation path (when `unzip`/`zip` tools are available) before accepting archives as valid.
-- Automatic cleanup of orphan `.part` files at startup in Step 1 and Step 2.
-- Windows permission preflight for workflow steps with optional UAC relaunch as Administrator when write access is blocked.
-- Compatibility wrapper in `2_mmf_download_stl_files.sh` delegating execution to `mmf_download_stl_files_enhanced.sh`.
-- `.gitattributes` policy to keep Bash scripts on LF line endings.
-
-### Changed
-- Step 1 now writes runtime `model_ids.txt` into app user data (`workflow-temp`) instead of script root to reduce permission failures.
-- Default minimum free-space thresholds were raised:
-  - Step 1: `MMF_METADATA_MIN_FREE_MB=512`
-  - Step 2: `MMF_MIN_FREE_SPACE_MB=2048`
-
-### Fixed
-- Resume behavior now discards invalid/truncated previously downloaded files and re-downloads safely.
-- Better handling for low-disk and restricted-folder scenarios that previously caused silent partial outputs.
-
-## [1.2.0] — 2026-05-19
-
-### Added
-- **Catalog load modes** (two options, both from `objectPreviews`):
-  - **Listing** — models you created (`creatorId` matches your account).
-  - **Library** — full data library (creations, purchases, gifts, tribes, downloads).
-- Large-library catalog handling: up to 64 MB JSON response, 3-minute timeout, in-memory parsing in 400-entry chunks (UI stays responsive).
-- **Resume by assets ZIP**: if a valid model archive ZIP already exists in the output folder, Step 2 skips STL/ZIP re-download for that model.
-- **Readable output folders** in Step 2: `{id}_{model_name}` by default (e.g. `228967_Kell_Ombis`); respects GUI `NAMING_FORMAT` / `MAX_NAME_LENGTH`. Legacy `model_<id>` folders still work on resume.
-- Card-style **Auto load source** selector in the UI.
-- Catalog auto-load after **Capture session** runs silently when the model list is empty (no extra confirm dialogs).
-
-### Fixed
-- Step 2 re-downloading files after a prior run: canonical path check before `unique_output_path` (avoids `file_1.zip`, `file_2.zip` duplicates).
-- Image downloads now skip existing valid files the same way as STL/ZIP.
-- Cross-run idempotency when switching between Listing and Library into the same download folder (metadata JSON skip + file/ZIP skip).
-
-### Changed
-- Removed store-API-only “listing” path; Listing and Library both use `objectPreviews` with different filters.
-- Step 2 receives `MMF_NAMING_FORMAT` and `MMF_MAX_NAME_LENGTH` from the desktop app (aligned with Step 4 rename settings).
-
-## [1.1.0] — 2026-05-19
-
-### Added
-- Embedded MyMiniFactory sign-in window with **Capture session** (cookies + JWT + publishable key).
-- **Check session** validation against Medusa API; session badge in the UI.
-- Paginated catalog load via store API (25 items per request) with `objectPreviews` merge when applicable.
-- Model list with ID + name, UI pagination (25 rows per page), remove per row.
-- Auto-load catalog after successful session capture when the list is empty.
-- Resume-safe downloads: skip existing metadata JSON and already-downloaded STL/ZIP files.
-- Encrypted credential storage (OS keychain when available), password fields, Electron sandbox.
-- Zip-slip protection on extraction; restricted “open folder” paths.
-
-### Changed
-- Application display name: **Bulk Downloader** (installer, window title, UI).
-- Conservative rate limits: 6s metadata, 5s STL/ZIP, 3s images, 1s between catalog pages.
-- Electron 33.x (from 31.x).
-- Manual model ID input removed; catalog comes from Auto load or saved list.
-
-### Security
-- Settings file chmod 600; full session cleared on auth failure during runs.
-
-## [1.0.0]
-- Initial desktop app with workflow scripts and dependency bootstrapper.
-</file>
-
 <file path="electron/mmf-catalog.js">
 const MMF_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0";
 const OBJECT_PREVIEWS_URL = "https://www.myminifactory.com/api/data-library/objectPreviews";
@@ -116169,6 +116095,99 @@ echo "[INFO] Using hardened downloader: $(basename "$ENHANCED_SCRIPT")"
 exec bash "$ENHANCED_SCRIPT" "$@"
 </file>
 
+<file path="CHANGELOG.md">
+# Changelog
+
+## [1.4.0] — 2026-05-21
+
+### Added
+- **Batch size 10** option in the desktop UI (alongside 25, 50, 100, and all pending).
+- **Pipeline progress panel** below Execute Pipeline / Download Next Batch: percentage bar plus phase labels for metadata download and Step 2 packaging.
+- Structured **`MMF_PROGRESS`** JSON events from Step 1 and Step 2 (enabled via `MMF_EMIT_PROGRESS=1` from the desktop app) for accurate UI updates instead of parsing colored log text alone.
+- **Step 2 batch filter** (`MMF_MODEL_IDS_FILTER`): automatic pipeline passes the current batch IDs so Step 2 can limit processing to that batch when the filter is set.
+- Per-model **live “completed” row styling** during a run (ZIP-ready), before the batch is written to persisted progress.
+- **Saved download folders**: missing paths are removed from history when Open reports they do not exist.
+
+### Changed
+- Model list pagination set to **20 rows per page**; the ID / Model and creator table keeps a **5-row scroll viewport** to save vertical space.
+- **Open folder** allowed roots now include every path in `downloadRootHistory`, not only the active Download folder and post-process paths.
+- **Remove** on model list rows is disabled while a workflow step or batch pipeline is running.
+
+### Fixed
+- Completed models stayed unhighlighted until changing list page; the list now refreshes when batch progress updates and when each model finishes packaging.
+- **“Path is outside the allowed download workspace”** when opening a folder from saved history that was not the current Download folder root.
+
+## [1.3.0] — 2026-05-20
+
+### Added
+- New **Creator** catalog mode with creator ID filter in the desktop UI and backend catalog resolution.
+- Creator metadata propagation end-to-end (`creatorId`, `creatorName`, `creatorUsername`) and rendering in model list rows.
+- Category taxonomy support from `gui/categories-taxonomy.json` with category + subcategory multi-select rules.
+- Category selection summary in the UI and export of selected categories into compact model JSON.
+- Collapsible categories/subcategories section to reduce scroll fatigue.
+- Download hardening in Step 1 and Step 2: atomic `.part` writes, proactive free-space checks, and explicit `curl` write-error handling.
+- ZIP integrity validation path (when `unzip`/`zip` tools are available) before accepting archives as valid.
+- Automatic cleanup of orphan `.part` files at startup in Step 1 and Step 2.
+- Windows permission preflight for workflow steps with optional UAC relaunch as Administrator when write access is blocked.
+- Compatibility wrapper in `2_mmf_download_stl_files.sh` delegating execution to `mmf_download_stl_files_enhanced.sh`.
+- `.gitattributes` policy to keep Bash scripts on LF line endings.
+
+### Changed
+- Step 1 now writes runtime `model_ids.txt` into app user data (`workflow-temp`) instead of script root to reduce permission failures.
+- Default minimum free-space thresholds were raised:
+  - Step 1: `MMF_METADATA_MIN_FREE_MB=512`
+  - Step 2: `MMF_MIN_FREE_SPACE_MB=2048`
+
+### Fixed
+- Resume behavior now discards invalid/truncated previously downloaded files and re-downloads safely.
+- Better handling for low-disk and restricted-folder scenarios that previously caused silent partial outputs.
+
+## [1.2.0] — 2026-05-19
+
+### Added
+- **Catalog load modes** (two options, both from `objectPreviews`):
+  - **Listing** — models you created (`creatorId` matches your account).
+  - **Library** — full data library (creations, purchases, gifts, tribes, downloads).
+- Large-library catalog handling: up to 64 MB JSON response, 3-minute timeout, in-memory parsing in 400-entry chunks (UI stays responsive).
+- **Resume by assets ZIP**: if a valid model archive ZIP already exists in the output folder, Step 2 skips STL/ZIP re-download for that model.
+- **Readable output folders** in Step 2: `{id}_{model_name}` by default (e.g. `228967_Kell_Ombis`); respects GUI `NAMING_FORMAT` / `MAX_NAME_LENGTH`. Legacy `model_<id>` folders still work on resume.
+- Card-style **Auto load source** selector in the UI.
+- Catalog auto-load after **Capture session** runs silently when the model list is empty (no extra confirm dialogs).
+
+### Fixed
+- Step 2 re-downloading files after a prior run: canonical path check before `unique_output_path` (avoids `file_1.zip`, `file_2.zip` duplicates).
+- Image downloads now skip existing valid files the same way as STL/ZIP.
+- Cross-run idempotency when switching between Listing and Library into the same download folder (metadata JSON skip + file/ZIP skip).
+
+### Changed
+- Removed store-API-only “listing” path; Listing and Library both use `objectPreviews` with different filters.
+- Step 2 receives `MMF_NAMING_FORMAT` and `MMF_MAX_NAME_LENGTH` from the desktop app (aligned with Step 4 rename settings).
+
+## [1.1.0] — 2026-05-19
+
+### Added
+- Embedded MyMiniFactory sign-in window with **Capture session** (cookies + JWT + publishable key).
+- **Check session** validation against Medusa API; session badge in the UI.
+- Paginated catalog load via store API (25 items per request) with `objectPreviews` merge when applicable.
+- Model list with ID + name, UI pagination (25 rows per page), remove per row.
+- Auto-load catalog after successful session capture when the list is empty.
+- Resume-safe downloads: skip existing metadata JSON and already-downloaded STL/ZIP files.
+- Encrypted credential storage (OS keychain when available), password fields, Electron sandbox.
+- Zip-slip protection on extraction; restricted “open folder” paths.
+
+### Changed
+- Application display name: **Bulk Downloader** (installer, window title, UI).
+- Conservative rate limits: 6s metadata, 5s STL/ZIP, 3s images, 1s between catalog pages.
+- Electron 33.x (from 31.x).
+- Manual model ID input removed; catalog comes from Auto load or saved list.
+
+### Security
+- Settings file chmod 600; full session cleared on auth failure during runs.
+
+## [1.0.0]
+- Initial desktop app with workflow scripts and dependency bootstrapper.
+</file>
+
 <file path="DESKTOP_EXE.md">
 # Desktop EXE Guide
 
@@ -116353,6 +116372,48 @@ Both scripts include:
 ✅ Safe operation - won't overwrite or damage existing data
 </file>
 
+<file path="electron/preload.js">
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("desktopApi", {
+    checkDependencies: () => ipcRenderer.invoke("desktop:check-dependencies"),
+    installMissingDependencies: () => ipcRenderer.invoke("desktop:install-missing-dependencies"),
+    getRuntimeInfo: (payload) => ipcRenderer.invoke("desktop:get-runtime-info", payload),
+    pickDirectory: (payload) => ipcRenderer.invoke("desktop:pick-directory", payload),
+    openPath: (payload) => ipcRenderer.invoke("desktop:open-path", payload),
+    listModelJsonFiles: (payload) => ipcRenderer.invoke("desktop:list-model-json-files", payload),
+    readModelJsonFile: (payload) => ipcRenderer.invoke("desktop:read-model-json-file", payload),
+    getCategoryTaxonomy: () => ipcRenderer.invoke("desktop:get-category-taxonomy"),
+    loadSettings: () => ipcRenderer.invoke("desktop:load-settings"),
+    saveSettings: (payload) => ipcRenderer.invoke("desktop:save-settings", payload),
+    resolveOwnModelIds: (payload) => ipcRenderer.invoke("desktop:resolve-own-model-ids", payload),
+    showConfirmDialog: (payload) => ipcRenderer.invoke("desktop:show-confirm-dialog", payload),
+    showAlertDialog: (payload) => ipcRenderer.invoke("desktop:show-alert-dialog", payload),
+    openMmfLogin: () => ipcRenderer.invoke("desktop:open-mmf-login"),
+    captureMmfSession: () => ipcRenderer.invoke("desktop:capture-mmf-session"),
+    validateMmfSession: () => ipcRenderer.invoke("desktop:validate-mmf-session"),
+    closeMmfLogin: () => ipcRenderer.invoke("desktop:close-mmf-login"),
+    clearMmfBrowserSession: () => ipcRenderer.invoke("desktop:clear-mmf-browser-session"),
+    startWorkflowStep: (payload) => ipcRenderer.invoke("desktop:start-workflow-step", payload),
+    stopWorkflowStep: () => ipcRenderer.invoke("desktop:stop-workflow-step"),
+    onWorkflowLog: (handler) => {
+        const listener = (_event, payload) => handler(payload);
+        ipcRenderer.on("workflow:log", listener);
+        return () => ipcRenderer.removeListener("workflow:log", listener);
+    },
+    onWorkflowState: (handler) => {
+        const listener = (_event, payload) => handler(payload);
+        ipcRenderer.on("workflow:state", listener);
+        return () => ipcRenderer.removeListener("workflow:state", listener);
+    },
+    onCatalogProgress: (handler) => {
+        const listener = (_event, payload) => handler(payload);
+        ipcRenderer.on("catalog:progress", listener);
+        return () => ipcRenderer.removeListener("catalog:progress", listener);
+    }
+});
+</file>
+
 <file path="1_mmf_download_metadata.sh">
 #!/bin/bash
 
@@ -116377,6 +116438,14 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+emit_progress_event() {
+    if [[ "${MMF_EMIT_PROGRESS:-0}" != "1" ]]; then
+        return 0
+    fi
+
+    printf 'MMF_PROGRESS %s\n' "$1"
+}
 
 # UPDATE THIS: Get your cookie from browser developer tools (F12 -> Network -> Copy Cookie header)
 COOKIE="${MMF_COOKIE:-REPLACE_WITH_YOUR_ACTUAL_COOKIE_STRING}"
@@ -116598,6 +116667,7 @@ fi
 current=0
 
 echo -e "${BLUE}Starting download of $total model metadata files...${NC}"
+emit_progress_event "{\"step\":\"metadata\",\"event\":\"start\",\"total\":$total}"
 echo "JSON files will be saved in: $DOWNLOAD_ROOT"
 echo "Rate limited (~10 requests/min, ${METADATA_DELAY_SEC}s delay between requests)"
 echo -e "${CYAN}Minimum free space required before each download: ${METADATA_MIN_FREE_MB} MB${NC}"
@@ -116618,12 +116688,14 @@ while read -r id; do
     fi
     
     current=$((current + 1))
+    emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"started\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
 
     final_file="model_${id}.json"
     tmp_file="${final_file}.part"
 
     if [[ -f "$final_file" ]] && [[ -s "$final_file" ]]; then
         if is_valid_metadata_json "$final_file" "$id"; then
+            emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"skipped\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
             echo -e "${GREEN}[$current/$total] Skipping model $id (metadata already exists — resume safe)${NC}"
             continue
         else
@@ -116660,21 +116732,27 @@ while read -r id; do
     # Check if download was successful
     if [[ "$curl_exit" -eq 23 ]]; then
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
         abort_no_space "downloading metadata for model $id"
     elif [[ "$curl_exit" -ne 0 ]]; then
         echo -e "${RED}Failed to download metadata for model $id (curl exit $curl_exit, HTTP ${http_code:-unknown})${NC}"
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     elif [[ "$http_code" != "200" ]]; then
         echo -e "${RED}Failed to download metadata for model $id (HTTP ${http_code:-unknown})${NC}"
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     elif ! is_valid_metadata_json "$tmp_file" "$id"; then
         echo -e "${RED}Failed metadata validation for model $id (truncated/invalid JSON or unexpected content)${NC}"
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     elif ! mv -f "$tmp_file" "$final_file"; then
         rm -f "$tmp_file" "$final_file"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"failed\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
         abort_no_space "saving metadata file for model $id"
     else
         echo -e "${GREEN}Successfully downloaded metadata for model $id${NC}"
+        emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"downloaded\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     fi
     
     # Rate limiting between requests
@@ -116683,6 +116761,8 @@ while read -r id; do
     fi
     
 done < "$MODEL_IDS_FILE"
+
+emit_progress_event "{\"step\":\"metadata\",\"event\":\"done\",\"total\":$total}"
 
 echo ""
 echo -e "${GREEN}Metadata download complete!${NC}"
@@ -116707,52 +116787,10 @@ echo -e "${BLUE}Next step: Use the STL downloader script to get actual 3D files$
 # - This downloads metadata only, use STL downloader script for actual files
 </file>
 
-<file path="electron/preload.js">
-const { contextBridge, ipcRenderer } = require("electron");
-
-contextBridge.exposeInMainWorld("desktopApi", {
-    checkDependencies: () => ipcRenderer.invoke("desktop:check-dependencies"),
-    installMissingDependencies: () => ipcRenderer.invoke("desktop:install-missing-dependencies"),
-    getRuntimeInfo: (payload) => ipcRenderer.invoke("desktop:get-runtime-info", payload),
-    pickDirectory: (payload) => ipcRenderer.invoke("desktop:pick-directory", payload),
-    openPath: (payload) => ipcRenderer.invoke("desktop:open-path", payload),
-    listModelJsonFiles: (payload) => ipcRenderer.invoke("desktop:list-model-json-files", payload),
-    readModelJsonFile: (payload) => ipcRenderer.invoke("desktop:read-model-json-file", payload),
-    getCategoryTaxonomy: () => ipcRenderer.invoke("desktop:get-category-taxonomy"),
-    loadSettings: () => ipcRenderer.invoke("desktop:load-settings"),
-    saveSettings: (payload) => ipcRenderer.invoke("desktop:save-settings", payload),
-    resolveOwnModelIds: (payload) => ipcRenderer.invoke("desktop:resolve-own-model-ids", payload),
-    showConfirmDialog: (payload) => ipcRenderer.invoke("desktop:show-confirm-dialog", payload),
-    showAlertDialog: (payload) => ipcRenderer.invoke("desktop:show-alert-dialog", payload),
-    openMmfLogin: () => ipcRenderer.invoke("desktop:open-mmf-login"),
-    captureMmfSession: () => ipcRenderer.invoke("desktop:capture-mmf-session"),
-    validateMmfSession: () => ipcRenderer.invoke("desktop:validate-mmf-session"),
-    closeMmfLogin: () => ipcRenderer.invoke("desktop:close-mmf-login"),
-    clearMmfBrowserSession: () => ipcRenderer.invoke("desktop:clear-mmf-browser-session"),
-    startWorkflowStep: (payload) => ipcRenderer.invoke("desktop:start-workflow-step", payload),
-    stopWorkflowStep: () => ipcRenderer.invoke("desktop:stop-workflow-step"),
-    onWorkflowLog: (handler) => {
-        const listener = (_event, payload) => handler(payload);
-        ipcRenderer.on("workflow:log", listener);
-        return () => ipcRenderer.removeListener("workflow:log", listener);
-    },
-    onWorkflowState: (handler) => {
-        const listener = (_event, payload) => handler(payload);
-        ipcRenderer.on("workflow:state", listener);
-        return () => ipcRenderer.removeListener("workflow:state", listener);
-    },
-    onCatalogProgress: (handler) => {
-        const listener = (_event, payload) => handler(payload);
-        ipcRenderer.on("catalog:progress", listener);
-        return () => ipcRenderer.removeListener("catalog:progress", listener);
-    }
-});
-</file>
-
 <file path="package.json">
 {
   "name": "mmf-bulk-downloader-desktop",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Desktop GUI + dependency bootstrapper for bulk download scripts",
   "main": "electron/main.js",
   "author": "Bulk Downloader",
@@ -117464,10 +117502,14 @@ select:focus {
 }
 
 .model-id-list {
+    --model-id-row-height: 56px;
+    --model-id-list-visible-rows: 5;
     list-style: none;
     margin: 0 0 8px;
     padding: 0;
-    min-height: 120px;
+    min-height: 0;
+    max-height: calc(var(--model-id-list-visible-rows) * var(--model-id-row-height));
+    overflow-y: auto;
     border: 1px solid var(--edge);
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.72);
@@ -117589,7 +117631,12 @@ select:focus {
     cursor: pointer;
 }
 
-.model-id-row-remove:hover {
+.model-id-row-remove:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.model-id-row-remove:not(:disabled):hover {
     color: var(--bad);
     border-color: rgba(191, 47, 47, 0.35);
 }
@@ -117779,6 +117826,73 @@ select:focus {
     border-radius: 999px;
     background: linear-gradient(90deg, var(--accent), var(--accent-warm));
     transition: width 220ms ease;
+}
+
+.pipeline-progress-panel {
+    margin: 12px 0 4px;
+    padding: 12px 14px;
+    border: 1px solid rgba(15, 118, 110, 0.18);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    background: rgba(248, 251, 250, 0.92);
+}
+
+.pipeline-progress-panel.hidden {
+    display: none;
+}
+
+.pipeline-progress-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.pipeline-progress-label {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--ink);
+}
+
+.pipeline-progress-percent {
+    font-family: "IBM Plex Mono", "Consolas", monospace;
+    font-size: 0.86rem;
+    font-weight: 700;
+    color: #0b4f4a;
+}
+
+.pipeline-progress-track {
+    margin-top: 0;
+    height: 14px;
+    background: rgba(16, 35, 29, 0.1);
+}
+
+.pipeline-progress-track .progress-bar {
+    position: relative;
+    overflow: hidden;
+    background-image:
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.24) 0 8px, transparent 8px 16px),
+        linear-gradient(90deg, var(--accent), var(--accent-warm));
+}
+
+.pipeline-progress-track .progress-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
+    transform: translateX(-100%);
+    animation: progress-sheen 1.8s ease-in-out infinite;
+}
+
+.pipeline-progress-detail {
+    margin: 8px 0 0;
+}
+
+@keyframes progress-sheen {
+    to {
+        transform: translateX(100%);
+    }
 }
 
 .preview {
@@ -118151,6 +118265,7 @@ select:focus {
                     <div>
                         <label for="batchSizeSelect">Batch size</label>
                         <select id="batchSizeSelect">
+                            <option value="10">10 models</option>
                             <option value="25">25 models</option>
                             <option value="50">50 models</option>
                             <option value="100">100 models</option>
@@ -118173,7 +118288,7 @@ select:focus {
                     <span id="modelListTotalInfo" class="model-list-total-info"></span>
                 </nav>
                 <textarea id="idsInput" class="hidden" tabindex="-1" aria-hidden="true"></textarea>
-                <p class="hint catalog-load-hint">All modes use objectPreviews. Large libraries are processed in chunks; the list shows 25 rows per page.</p>
+                <p class="hint catalog-load-hint">All modes use objectPreviews. Large libraries are processed in chunks; the list shows 20 rows per page.</p>
 
                 <details class="category-section" id="categorySectionPanel" open>
                     <summary id="categorySelectionHeading" class="subheading">Categories and subcategories</summary>
@@ -118281,6 +118396,17 @@ select:focus {
                 <button id="stopRunBtn" type="button" class="btn btn-danger" disabled>Stop active run</button>
             </div>
 
+            <div id="pipelineProgressPanel" class="pipeline-progress-panel hidden" aria-live="polite">
+                <div class="pipeline-progress-head">
+                    <span id="pipelineProgressLabel" class="pipeline-progress-label">Pipeline progress</span>
+                    <span id="pipelineProgressPercent" class="pipeline-progress-percent">0%</span>
+                </div>
+                <div class="progress-track pipeline-progress-track" role="progressbar" aria-label="Pipeline progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div id="pipelineProgressBar" class="progress-bar"></div>
+                </div>
+                <p id="pipelineProgressDetail" class="hint pipeline-progress-detail"></p>
+            </div>
+
             <div class="button-row">
                 <button id="clearLogBtn" type="button" class="btn btn-secondary">Clear run log</button>
                 <button id="openFilesFolderBtn" type="button" class="btn btn-secondary">Open files folder</button>
@@ -118375,6 +118501,1366 @@ select:focus {
 </html>
 </file>
 
+<file path="mmf_download_stl_files_enhanced.sh">
+#!/bin/bash
+
+# Bulk Downloader — STL/ZIP files, enhanced (Step 2)
+# Downloads actual 3D printable files from a list of model IDs
+# This is STEP 2 - run AFTER the metadata downloader creates JSON files
+# 
+# NEW in Enhanced Edition:
+# - Cookie validation before starting
+# - Automatic HTML error page detection
+# - Test mode to verify setup before bulk download
+# - Better error messages with troubleshooting steps
+# - Stops on systematic errors (e.g., all downloads failing)
+# 
+# Prerequisites:
+# 1. JSON metadata files from Step 1 (model_*.json files)
+# 2. Valid MyMiniFactory session cookie
+# 3. jq installed (JSON parser) - download from https://github.com/stedolan/jq/releases
+#
+# Usage:
+# 1. Run metadata downloader first (Step 1)
+# 2. Update COOKIE variable below with your session cookie
+# 3. Place jq or jq.exe in same directory
+# 4. Run in test mode first: bash download_stl_files.sh --test
+# 5. If test passes, run full: bash download_stl_files.sh
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+# UPDATE THIS: Get your cookie from browser developer tools
+# 
+# HOW TO GET YOUR COOKIE (IMPORTANT - READ CAREFULLY):
+# 1. Open MyMiniFactory in your browser and log in
+# 2. Navigate to any model you own
+# 3. Click download button for any file (Resin, FDM, etc.)
+# 4. Open Developer Tools (F12)
+# 5. Go to Network tab
+# 6. Find the request to "myminifactory.com/download/XXXXX?archive_id=XXXXX"
+# 7. Click on that request
+# 8. Scroll to "Request Headers" section
+# 9. Find the "Cookie:" header
+# 10. Copy ONLY the value (everything after "Cookie: ")
+# 11. Paste below between the single quotes
+#
+# Your cookie MUST include these parts:
+# - PHPSESSID=...
+# - cf_clearance=... (Cloudflare token - CRITICAL)
+# - Various _ga and _pk tracking cookies
+#
+# If you're missing cf_clearance, you'll get "enable Javascript" errors
+COOKIE="${MMF_COOKIE:-REPLACE_WITH_YOUR_ACTUAL_COOKIE_STRING}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ============================================================================
+
+# Configuration
+TEST_MODE=false
+MAX_CONSECUTIVE_FAILURES=3  # Stop if this many downloads fail in a row
+STL_FILE_DELAY_SEC="${MMF_STL_FILE_DELAY_SEC:-5}"
+IMAGE_DELAY_SEC="${MMF_IMAGE_DELAY_SEC:-3}"
+MIN_FREE_SPACE_MB="${MMF_MIN_FREE_SPACE_MB:-2048}"
+CURL_RETRIES="${MMF_CURL_RETRIES:-2}"
+MODEL_IDS_FILTER_RAW="${MMF_MODEL_IDS_FILTER:-}"
+
+DOWNLOAD_LAST_CURL_EXIT=0
+DOWNLOAD_LAST_HTTP_CODE=""
+DOWNLOAD_LAST_TMP_FILE=""
+DISK_CHECK_WARNED=0
+MODEL_IDS_FILTER_PADDED=""
+MODEL_IDS_FILTER_ACTIVE=0
+ASSET_PROGRESS_TOTAL_UNITS=0
+ASSET_PROGRESS_DONE_UNITS=0
+ASSET_PROGRESS_MODELS_DONE=0
+
+emit_progress_event() {
+    if [[ "${MMF_EMIT_PROGRESS:-0}" != "1" ]]; then
+        return 0
+    fi
+
+    printf 'MMF_PROGRESS %s\n' "$1"
+}
+
+load_model_ids_filter() {
+    local token
+    local normalized_filter
+    MODEL_IDS_FILTER_PADDED=""
+    MODEL_IDS_FILTER_ACTIVE=0
+
+    normalized_filter="${MODEL_IDS_FILTER_RAW//$'\r'/ }"
+    normalized_filter="${normalized_filter//,/ }"
+    normalized_filter="${normalized_filter//;/ }"
+
+    for token in $normalized_filter; do
+        token="$(printf "%s" "$token" | tr -d '\r' | xargs)"
+        if [[ "$token" =~ ^[0-9]+$ ]] && [[ "$MODEL_IDS_FILTER_PADDED" != *" $token "* ]]; then
+            MODEL_IDS_FILTER_PADDED="${MODEL_IDS_FILTER_PADDED} ${token}"
+        fi
+    done
+
+    if [[ -n "$MODEL_IDS_FILTER_PADDED" ]]; then
+        MODEL_IDS_FILTER_PADDED="${MODEL_IDS_FILTER_PADDED} "
+        MODEL_IDS_FILTER_ACTIVE=1
+    fi
+}
+
+is_model_id_selected() {
+    local model_id="$1"
+    [[ "$MODEL_IDS_FILTER_ACTIVE" -eq 0 || "$MODEL_IDS_FILTER_PADDED" == *" $model_id "* ]]
+}
+
+emit_asset_progress_start() {
+    emit_progress_event "{\"step\":\"assets\",\"event\":\"start\",\"totalModels\":$1,\"workTotal\":$2,\"workDone\":0,\"modelsDone\":0}"
+}
+
+emit_asset_progress_model_start() {
+    emit_progress_event "{\"step\":\"assets\",\"event\":\"model-start\",\"modelId\":\"$1\",\"currentModel\":$2,\"totalModels\":$3,\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_DONE_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
+}
+
+emit_asset_progress_unit() {
+    local model_id="$1"
+    local kind="$2"
+    local status="$3"
+
+    ASSET_PROGRESS_DONE_UNITS=$((ASSET_PROGRESS_DONE_UNITS + 1))
+    if [[ "$ASSET_PROGRESS_TOTAL_UNITS" -gt 0 && "$ASSET_PROGRESS_DONE_UNITS" -gt "$ASSET_PROGRESS_TOTAL_UNITS" ]]; then
+        ASSET_PROGRESS_DONE_UNITS="$ASSET_PROGRESS_TOTAL_UNITS"
+    fi
+
+    emit_progress_event "{\"step\":\"assets\",\"event\":\"unit\",\"modelId\":\"$model_id\",\"kind\":\"$kind\",\"status\":\"$status\",\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_DONE_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
+}
+
+emit_asset_progress_model_done() {
+    local model_id="$1"
+    ASSET_PROGRESS_MODELS_DONE=$((ASSET_PROGRESS_MODELS_DONE + 1))
+    emit_progress_event "{\"step\":\"assets\",\"event\":\"model-done\",\"modelId\":\"$model_id\",\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_DONE_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
+}
+
+if [[ ! "$MIN_FREE_SPACE_MB" =~ ^[0-9]+$ ]]; then
+    MIN_FREE_SPACE_MB=2048
+fi
+
+if [[ ! "$CURL_RETRIES" =~ ^[0-9]+$ ]]; then
+    CURL_RETRIES=2
+fi
+
+# Parse command line arguments
+if [[ "$1" == "--test" ]]; then
+    TEST_MODE=true
+fi
+
+# Function to validate cookie format
+validate_cookie() {
+    if [[ "$COOKIE" == "REPLACE_WITH_YOUR_ACTUAL_COOKIE_STRING" ]]; then
+        echo -e "${RED}ERROR: Cookie not configured!${NC}"
+        echo "Please update the COOKIE variable in this script with your actual session cookie."
+        echo "See the HOW TO GET YOUR COOKIE instructions in the script."
+        return 1
+    fi
+    
+    if [[ ! "$COOKIE" =~ PHPSESSID ]]; then
+        echo -e "${YELLOW}WARNING: Cookie missing PHPSESSID - this may not work${NC}"
+    fi
+    
+    if [[ ! "$COOKIE" =~ cf_clearance ]]; then
+        echo -e "${YELLOW}WARNING: Cookie missing cf_clearance (Cloudflare token)${NC}"
+        echo "This is the most common cause of 'enable Javascript' errors."
+        echo "Make sure you copied the cookie from a DOWNLOAD request, not a page view."
+        return 1
+    fi
+    
+    echo -e "${GREEN}[OK] Cookie format looks valid${NC}"
+    return 0
+}
+
+# Function to check if downloaded file is an HTML error page
+is_html_error() {
+    local file="$1"
+    
+    if [[ ! -f "$file" ]] || [[ ! -s "$file" ]]; then
+        return 1
+    fi
+    
+    # Check if file starts with HTML tags or common error messages
+    if head -20 "$file" | grep -qi "<!DOCTYPE\|<html\|enable javascript\|cloudflare"; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# Function to display error page content
+show_error_content() {
+    local file="$1"
+    echo -e "${CYAN}Error page content (first 20 lines):${NC}"
+    head -20 "$file" | sed 's/^/  /'
+}
+
+get_file_size() {
+    local file="$1"
+    stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo "unknown"
+}
+
+get_available_kb() {
+    local probe_path="$1"
+    local check_path="$probe_path"
+
+    if [[ -z "$check_path" ]]; then
+        check_path="."
+    fi
+
+    if [[ ! -d "$check_path" ]]; then
+        check_path="$(dirname "$check_path")"
+    fi
+
+    if command -v df >/dev/null 2>&1; then
+        df -Pk "$check_path" 2>/dev/null | awk 'NR==2 {print $4}'
+        return
+    fi
+
+    echo ""
+}
+
+ensure_min_free_space() {
+    local probe_path="$1"
+    local required_mb="$2"
+    local context="$3"
+
+    if [[ "$required_mb" -le 0 ]]; then
+        return 0
+    fi
+
+    local available_kb
+    available_kb="$(get_available_kb "$probe_path")"
+
+    if [[ ! "$available_kb" =~ ^[0-9]+$ ]]; then
+        if [[ "$DISK_CHECK_WARNED" -eq 0 ]]; then
+            echo -e "${YELLOW}! Could not determine free disk space on this system. Continuing without proactive disk check.${NC}"
+            DISK_CHECK_WARNED=1
+        fi
+        return 0
+    fi
+
+    local required_kb=$((required_mb * 1024))
+    if (( available_kb < required_kb )); then
+        local available_mb=$((available_kb / 1024))
+        echo -e "${RED}Error: Low disk space (${context}).${NC}"
+        echo -e "${RED}Required free space: ${required_mb} MB, available: ${available_mb} MB.${NC}"
+        return 1
+    fi
+
+    return 0
+}
+
+abort_no_space() {
+    local context="$1"
+    echo ""
+    echo -e "${RED}=======================================================${NC}"
+    echo -e "${RED}STOPPING: No space left on device${NC}"
+    echo -e "${RED}=======================================================${NC}"
+    echo -e "${YELLOW}Context: ${context}${NC}"
+    echo "Free disk space and run the script again."
+    echo "Only validated complete files are kept; partial files are discarded."
+    exit 1
+}
+
+validate_zip_integrity() {
+    local zip_file="$1"
+
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -tqq "$zip_file" >/dev/null 2>&1
+        return $?
+    fi
+
+    if command -v zip >/dev/null 2>&1; then
+        zip -T "$zip_file" >/dev/null 2>&1
+        return $?
+    fi
+
+    # If we cannot validate archive internals, keep prior behavior.
+    return 0
+}
+
+is_valid_download_file() {
+    local file_path="$1"
+    local logical_name="$2"
+    local normalized_name=""
+
+    if [[ ! -f "$file_path" ]] || [[ ! -s "$file_path" ]]; then
+        return 1
+    fi
+
+    if is_html_error "$file_path"; then
+        return 1
+    fi
+
+    normalized_name="$(printf '%s' "$logical_name" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$normalized_name" == *.zip ]]; then
+        validate_zip_integrity "$file_path" || return 1
+    fi
+
+    return 0
+}
+
+download_file_with_guards() {
+    local download_url="$1"
+    local output_path="$2"
+    local accept_header="$3"
+    local context_label="$4"
+    local logical_name="$5"
+    local tmp_path="${output_path}.part"
+
+    DOWNLOAD_LAST_CURL_EXIT=0
+    DOWNLOAD_LAST_HTTP_CODE=""
+    DOWNLOAD_LAST_TMP_FILE="$tmp_path"
+
+    rm -f "$tmp_path"
+
+    if ! ensure_min_free_space "$output_path" "$MIN_FREE_SPACE_MB" "$context_label"; then
+        DOWNLOAD_LAST_CURL_EXIT=23
+        return 23
+    fi
+
+    DOWNLOAD_LAST_HTTP_CODE="$(curl --silent --show-error -L \
+        -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0" \
+        -H "Accept: $accept_header" \
+        -H "Cookie: $COOKIE" \
+        --compressed \
+        --retry "$CURL_RETRIES" \
+        --retry-delay 2 \
+        -w "%{http_code}" \
+        "$download_url" \
+        -o "$tmp_path")"
+    DOWNLOAD_LAST_CURL_EXIT=$?
+
+    if [[ "$DOWNLOAD_LAST_CURL_EXIT" -ne 0 ]]; then
+        if [[ "$DOWNLOAD_LAST_CURL_EXIT" -ne 23 ]]; then
+            rm -f "$tmp_path"
+            DOWNLOAD_LAST_TMP_FILE=""
+        fi
+        return "$DOWNLOAD_LAST_CURL_EXIT"
+    fi
+
+    if [[ ! "$DOWNLOAD_LAST_HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+        rm -f "$tmp_path"
+        DOWNLOAD_LAST_TMP_FILE=""
+        return 22
+    fi
+
+    if ! is_valid_download_file "$tmp_path" "$logical_name"; then
+        return 65
+    fi
+
+    if ! mv -f "$tmp_path" "$output_path"; then
+        rm -f "$tmp_path"
+        DOWNLOAD_LAST_TMP_FILE=""
+
+        if ! ensure_min_free_space "$output_path" "$MIN_FREE_SPACE_MB" "saving ${context_label}"; then
+            DOWNLOAD_LAST_CURL_EXIT=23
+            return 23
+        fi
+
+        return 1
+    fi
+
+    DOWNLOAD_LAST_TMP_FILE=""
+    return 0
+}
+
+cleanup_orphan_part_files() {
+    local removed_count=0
+
+    while IFS= read -r -d '' part_file; do
+        rm -f "$part_file"
+        removed_count=$((removed_count + 1))
+    done < <(find . -type f -name "*.part" -print0 2>/dev/null)
+
+    if [[ "$removed_count" -gt 0 ]]; then
+        echo -e "${YELLOW}! Removed ${removed_count} orphan .part file(s) from previous interrupted runs.${NC}"
+    fi
+}
+
+sanitize_filename() {
+    local original_name="$1"
+    local sanitized_name
+    sanitized_name=$(printf "%s" "$original_name" | tr '/\\:*?"<>|' '_')
+    sanitized_name=$(printf "%s" "$sanitized_name" | tr -d '\r\n')
+    sanitized_name="${sanitized_name## }"
+    sanitized_name="${sanitized_name%% }"
+
+    if [[ -z "$sanitized_name" ]]; then
+        sanitized_name="unnamed_file"
+    fi
+
+    printf "%s" "$sanitized_name"
+}
+
+FOLDER_NAMING_FORMAT="${MMF_NAMING_FORMAT:-ID_NAME}"
+MAX_FOLDER_NAME_LENGTH="${MMF_MAX_NAME_LENGTH:-80}"
+
+if [[ "$FOLDER_NAMING_FORMAT" != "NAME_ONLY" ]]; then
+    FOLDER_NAMING_FORMAT="ID_NAME"
+fi
+
+if [[ ! "$MAX_FOLDER_NAME_LENGTH" =~ ^[0-9]+$ ]]; then
+    MAX_FOLDER_NAME_LENGTH=80
+fi
+
+if [[ "$MAX_FOLDER_NAME_LENGTH" -lt 10 ]]; then
+    MAX_FOLDER_NAME_LENGTH=10
+elif [[ "$MAX_FOLDER_NAME_LENGTH" -gt 160 ]]; then
+    MAX_FOLDER_NAME_LENGTH=160
+fi
+
+sanitize_folder_name() {
+    local name="$1"
+    local cleaned=""
+
+    cleaned="$(printf "%s" "$name" | tr -d '\r\n')"
+    cleaned="$(printf "%s" "$cleaned" | sed -E 's/[<>:"/\\|?*]/_/g; s/[[:space:]]+/ /g; s/ /_/g; s/_+/_/g; s/^_+//; s/_+$//')"
+
+    if [[ -z "$cleaned" ]]; then
+        cleaned="unnamed_model"
+    fi
+
+    if [[ ${#cleaned} -gt $MAX_FOLDER_NAME_LENGTH ]]; then
+        cleaned="${cleaned:0:$MAX_FOLDER_NAME_LENGTH}"
+        cleaned="$(printf "%s" "$cleaned" | sed -E 's/_+$//')"
+    fi
+
+    if [[ -z "$cleaned" ]]; then
+        cleaned="unnamed_model"
+    fi
+
+    printf "%s" "$cleaned"
+}
+
+build_model_folder_name() {
+    local source_json="$1"
+    local model_id="$2"
+    local model_name=""
+    local clean_name=""
+
+    model_name=$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null | tr -d '\r' | xargs)
+    clean_name=$(sanitize_folder_name "$model_name")
+
+    if [[ "$FOLDER_NAMING_FORMAT" == "NAME_ONLY" ]]; then
+        printf '%s' "$clean_name"
+        return
+    fi
+
+    printf '%s_%s' "$model_id" "$clean_name"
+}
+
+unique_model_dir_name() {
+    local desired_name="$1"
+    local model_id="$2"
+    local candidate="$desired_name"
+
+    if [[ ! -e "$candidate" ]]; then
+        printf '%s' "$candidate"
+        return
+    fi
+
+    local suffix=1
+    while [[ -e "${desired_name}_${suffix}" ]]; do
+        suffix=$((suffix + 1))
+    done
+
+    printf '%s' "${desired_name}_${suffix}"
+}
+
+resolve_model_dir() {
+    local model_id="$1"
+    local json_file="$2"
+    local preferred=""
+    local legacy="model_${model_id}"
+
+    preferred=$(build_model_folder_name "$json_file" "$model_id")
+
+    if [[ -d "$preferred" ]]; then
+        printf '%s' "$preferred"
+        return
+    fi
+
+    if [[ -d "$legacy" ]]; then
+        printf '%s' "$legacy"
+        return
+    fi
+
+    preferred=$(unique_model_dir_name "$preferred" "$model_id")
+    printf '%s' "$preferred"
+}
+
+unique_output_path() {
+    local base_dir="$1"
+    local target_name="$2"
+    local candidate_path="${base_dir}/${target_name}"
+
+    if [[ ! -e "$candidate_path" ]]; then
+        printf "%s" "$candidate_path"
+        return
+    fi
+
+    local suffix=1
+    local name_without_ext="$target_name"
+    local extension=""
+
+    if [[ "$target_name" == *.* ]]; then
+        name_without_ext="${target_name%.*}"
+        extension=".${target_name##*.}"
+    fi
+
+    while true; do
+        candidate_path="${base_dir}/${name_without_ext}_${suffix}${extension}"
+        if [[ ! -e "$candidate_path" ]]; then
+            printf "%s" "$candidate_path"
+            return
+        fi
+        suffix=$((suffix + 1))
+    done
+}
+
+get_model_archive_basename() {
+    local source_json="$1"
+    local model_id="$2"
+    local model_name=""
+    local archive_base=""
+
+    model_name=$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null | tr -d '\r' | xargs)
+    archive_base=$(sanitize_filename "$model_name")
+
+    if [[ -z "$archive_base" || "$archive_base" == "null" ]]; then
+        archive_base="model_${model_id}_assets"
+    fi
+
+    printf "%s" "$archive_base"
+}
+
+is_valid_archive_file() {
+    local file_path="$1"
+    is_valid_download_file "$file_path" "$(basename "$file_path")"
+}
+
+find_existing_assets_archive() {
+    local model_dir="$1"
+    local archive_base="$2"
+    local candidate=""
+
+    if [[ ! -d "$model_dir" ]]; then
+        return 1
+    fi
+
+    candidate="${model_dir}/${archive_base}.zip"
+    if is_valid_archive_file "$candidate"; then
+        printf "%s" "$candidate"
+        return 0
+    fi
+
+    shopt -s nullglob
+    for candidate in "${model_dir}/${archive_base}"*.zip; do
+        if is_valid_archive_file "$candidate"; then
+            shopt -u nullglob
+            printf "%s" "$candidate"
+            return 0
+        fi
+    done
+    shopt -u nullglob
+
+    return 1
+}
+
+model_assets_already_archived() {
+    local model_dir="$1"
+    local source_json="$2"
+    local model_id="$3"
+    local archive_base=""
+
+    archive_base=$(get_model_archive_basename "$source_json" "$model_id")
+    find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null
+}
+
+count_model_progress_units() {
+    local source_json="$1"
+    local model_id="$2"
+    local model_dir
+    local downloadable_count
+    local image_count
+
+    downloadable_count=$($JQ_CMD -r '[.files.items[]? | .download_url | select(. != null and . != "")] | length' "$source_json" 2>/dev/null)
+    if [[ ! "$downloadable_count" =~ ^[0-9]+$ ]]; then
+        downloadable_count=0
+    fi
+
+    if [[ "$downloadable_count" -eq 0 ]]; then
+        echo 1
+        return
+    fi
+
+    image_count=$($JQ_CMD -r '[.images[]? | .original.url | select(. != null and . != "")] | length' "$source_json" 2>/dev/null)
+    if [[ ! "$image_count" =~ ^[0-9]+$ ]]; then
+        image_count=0
+    fi
+
+    model_dir=$(resolve_model_dir "$model_id" "$source_json")
+    if model_assets_already_archived "$model_dir" "$source_json" "$model_id"; then
+        echo $((image_count + 3))
+        return
+    fi
+
+    echo $((downloadable_count + image_count + 3))
+}
+
+write_compact_model_json() {
+    local source_json="$1"
+    local model_dir="$2"
+    local model_id="$3"
+    local output_json="${model_dir}/model_${model_id}.json"
+    local output_tmp="${output_json}.part"
+    local selected_categories_json="${MMF_CATEGORY_SELECTION_JSON:-[]}"
+    local selected_category_tag_names_json="${MMF_CATEGORY_SELECTION_TAG_NAMES_JSON:-[]}"
+
+    rm -f "$output_tmp"
+
+    if ! ensure_min_free_space "$output_json" "$MIN_FREE_SPACE_MB" "writing compact JSON for model $model_id"; then
+        abort_no_space "writing compact JSON for model $model_id"
+    fi
+
+    if ! printf '%s' "$selected_categories_json" | $JQ_CMD -e '. | type == "array"' >/dev/null 2>&1; then
+        selected_categories_json='[]'
+    fi
+
+    if ! printf '%s' "$selected_category_tag_names_json" | $JQ_CMD -e '. | type == "array"' >/dev/null 2>&1; then
+        selected_category_tag_names_json='[]'
+    fi
+
+    if $JQ_CMD --argjson selected_categories "$selected_categories_json" --argjson selected_category_tag_names "$selected_category_tag_names_json" '{
+        name: (.name // ""),
+        description: (.description // ""),
+        tags: (
+            (
+                if .tags == null then []
+                elif (.tags | type) == "array" then .tags
+                elif (.tags | type) == "string" then
+                    if (.tags | length) == 0 then [] else [ .tags ] end
+                else
+                    [ .tags ]
+                end
+            )
+            | map(
+                if type == "string" then .
+                elif . == null then ""
+                else tostring
+                end
+            )
+            | map(gsub("^\\s+|\\s+$"; ""))
+            | map(select(length > 0))
+            | if length > 0 then
+                .
+              else
+                (
+                    if ($selected_category_tag_names | type) == "array" then
+                        $selected_category_tag_names
+                        | map(
+                            if type == "string" then .
+                            elif . == null then ""
+                            else tostring
+                            end
+                        )
+                        | map(gsub("^\\s+|\\s+$"; ""))
+                        | map(select(length > 0))
+                        | unique
+                    else
+                        []
+                    end
+                )
+              end
+        ),
+        price: (
+            if .price == null or .price == "" then 5
+            elif (.price | type) == "number" then .price
+            elif (.price | type) == "string" then ((.price | tonumber?) // 5)
+            elif (.price | type) == "object" then (
+                if .price.value == null or .price.value == "" then 5
+                elif (.price.value | type) == "number" then .price.value
+                elif (.price.value | type) == "string" then ((.price.value | tonumber?) // 5)
+                else 5
+                end
+            )
+            else 5
+            end
+        ),
+        categories: (
+            if ($selected_categories | type) == "array" then
+                $selected_categories
+                | map(
+                    if type == "object" then
+                        {
+                            id: (.id // "" | tostring),
+                            subcategories: (
+                                if (.subcategoryIds | type) == "array" then .subcategoryIds
+                                elif (.subcategories | type) == "array" then .subcategories
+                                else []
+                                end
+                                | map(tostring)
+                                | map(select(length > 0))
+                                | unique
+                            )
+                        }
+                    else
+                        empty
+                    end
+                )
+                | map(select(.id | length > 0))
+                | map(select(.subcategories | length > 0))
+            else
+                []
+            end
+        )
+    }' "$source_json" > "$output_tmp"; then
+        if ! mv -f "$output_tmp" "$output_json"; then
+            rm -f "$output_tmp"
+            abort_no_space "saving compact JSON for model $model_id"
+        fi
+        echo -e "  ${GREEN}[OK] Wrote compact JSON: model_${model_id}.json${NC}"
+        return 0
+    fi
+
+    echo -e "  ${RED}[FAIL] Failed to build compact JSON for model $model_id${NC}"
+    rm -f "$output_tmp"
+
+    if ! printf '{"name":"","description":"","tags":[],"price":5,"categories":[]}\n' > "$output_tmp"; then
+        abort_no_space "writing fallback compact JSON for model $model_id"
+    fi
+
+    if ! mv -f "$output_tmp" "$output_json"; then
+        rm -f "$output_tmp"
+        abort_no_space "saving fallback compact JSON for model $model_id"
+    fi
+
+    return 1
+}
+
+download_model_images() {
+    local source_json="$1"
+    local model_dir="$2"
+    local model_id="$3"
+
+    local image_data
+    image_data=$($JQ_CMD -r '.images[]? | "\((.is_primary // false) | tostring)|\(.original.url // "")"' "$source_json" 2>/dev/null)
+
+    if [[ -z "$image_data" ]]; then
+        echo -e "  ${YELLOW}! No images with original URL found${NC}"
+        return 0
+    fi
+
+    local images_dir="${model_dir}/images"
+    mkdir -p "$images_dir"
+
+    local image_index=0
+
+    while IFS='|' read -r is_primary image_url; do
+        if [[ -z "$image_url" ]]; then
+            continue
+        fi
+
+        image_index=$((image_index + 1))
+        total_downloads=$((total_downloads + 1))
+
+        image_url=$(echo "$image_url" | tr -d '\r' | xargs)
+        local url_without_query="${image_url%%\?*}"
+        local original_name
+        original_name=$(basename "$url_without_query")
+
+        if [[ -z "$original_name" ]]; then
+            original_name="image_${image_index}.bin"
+        fi
+
+        local target_name
+        if [[ "$is_primary" == "true" ]]; then
+            local extension=""
+            if [[ "$original_name" == *.* ]]; then
+                extension=".${original_name##*.}"
+            fi
+            target_name="thumbnail_image${extension}"
+        else
+            target_name="$original_name"
+        fi
+
+        target_name=$(sanitize_filename "$target_name")
+        local canonical_image_path="${images_dir}/${target_name}"
+
+        if [[ -f "$canonical_image_path" ]] && is_valid_download_file "$canonical_image_path" "$target_name"; then
+            local existing_image_size
+            existing_image_size=$(get_file_size "$canonical_image_path")
+            echo -e "  ${GREEN}[SKIP] Image already downloaded: $(basename "$canonical_image_path") (${existing_image_size} bytes)${NC}"
+            successful_downloads=$((successful_downloads + 1))
+            emit_asset_progress_unit "$model_id" "image" "skipped"
+            continue
+        fi
+
+        if [[ -e "$canonical_image_path" ]]; then
+            echo -e "  ${YELLOW}! Removing invalid existing image file: $(basename "$canonical_image_path")${NC}"
+            rm -f "$canonical_image_path"
+        fi
+
+        local output_path
+        output_path=$(unique_output_path "$images_dir" "$target_name")
+
+        echo -e "  ${YELLOW}Downloading image: $(basename "$output_path")${NC}"
+
+        if download_file_with_guards "$image_url" "$output_path" "image/*,*/*;q=0.8" "downloading image $(basename "$output_path")" "$(basename "$output_path")"; then
+            local image_size
+            image_size=$(get_file_size "$output_path")
+            echo -e "  ${GREEN}[OK] Downloaded image $(basename "$output_path") (${image_size} bytes)${NC}"
+            successful_downloads=$((successful_downloads + 1))
+            emit_asset_progress_unit "$model_id" "image" "downloaded"
+        else
+            if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
+                rm -f "$output_path" "${output_path}.part"
+                emit_asset_progress_unit "$model_id" "image" "failed"
+                abort_no_space "downloading image $(basename "$output_path")"
+            fi
+
+            if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]]; then
+                if is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
+                    echo -e "  ${RED}[FAIL] Failed image download: received HTML error page${NC}"
+                else
+                    echo -e "  ${RED}[FAIL] Failed image validation for $(basename "$output_path")${NC}"
+                fi
+                rm -f "$DOWNLOAD_LAST_TMP_FILE"
+            else
+                echo -e "  ${RED}[FAIL] Failed to download image $(basename "$output_path") (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, HTTP ${DOWNLOAD_LAST_HTTP_CODE:-unknown})${NC}"
+            fi
+
+            rm -f "$output_path"
+            emit_asset_progress_unit "$model_id" "image" "failed"
+        fi
+
+        sleep "$IMAGE_DELAY_SEC"
+    done <<< "$image_data"
+}
+
+compress_non_json_assets() {
+    local model_dir="$1"
+    local source_json="$2"
+    local model_id="$3"
+    local archive_base=""
+    local existing_archive=""
+
+    archive_base=$(get_model_archive_basename "$source_json" "$model_id")
+    existing_archive=$(find_existing_assets_archive "$model_dir" "$archive_base" || true)
+
+    if [[ -n "$existing_archive" ]]; then
+        local existing_size
+        existing_size=$(get_file_size "$existing_archive")
+        echo -e "  ${GREEN}[SKIP] Assets archive already exists: $(basename "$existing_archive") (${existing_size} bytes)${NC}"
+        return 0
+    fi
+
+    local archive_name="${archive_base}.zip"
+    local archive_path
+    archive_path=$(unique_output_path "$model_dir" "$archive_name")
+    archive_name=$(basename "$archive_path")
+
+    local -a files_to_zip=()
+
+    while IFS= read -r file_path; do
+        files_to_zip+=("$(basename "$file_path")")
+    done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$archive_name")
+
+    if [[ ${#files_to_zip[@]} -eq 0 ]]; then
+        echo -e "  ${YELLOW}! No non-JSON files to compress${NC}"
+        return 0
+    fi
+
+    if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "creating ZIP archive for model $model_id"; then
+        abort_no_space "creating ZIP archive for model $model_id"
+    fi
+
+    rm -f "$archive_path"
+    local compression_exit=0
+
+    if command -v zip >/dev/null 2>&1; then
+        (cd "$model_dir" && zip -q "$archive_name" "${files_to_zip[@]}")
+        compression_exit=$?
+    elif command -v tar >/dev/null 2>&1; then
+        (cd "$model_dir" && tar -a -cf "$archive_name" "${files_to_zip[@]}")
+        compression_exit=$?
+    else
+        echo -e "  ${RED}[FAIL] Could not compress files: zip/tar not found${NC}"
+        return 1
+    fi
+
+    if [[ "$compression_exit" -ne 0 ]]; then
+        rm -f "$archive_path"
+        if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "creating ZIP archive for model $model_id"; then
+            abort_no_space "creating ZIP archive for model $model_id"
+        fi
+        echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
+        return 1
+    fi
+
+    if is_valid_archive_file "$archive_path"; then
+        for file_name in "${files_to_zip[@]}"; do
+            rm -f "${model_dir}/${file_name}"
+        done
+        local zip_size
+        zip_size=$(get_file_size "$archive_path")
+        echo -e "  ${GREEN}[OK] Created $(basename "$archive_path") (${zip_size} bytes)${NC}"
+        return 0
+    fi
+
+    rm -f "$archive_path"
+
+    if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "verifying ZIP archive for model $model_id"; then
+        abort_no_space "creating ZIP archive for model $model_id"
+    fi
+
+    echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
+    return 1
+}
+
+echo -e "${CYAN}========================================================${NC}"
+echo -e "${CYAN}   Bulk Downloader — STL/ZIP (Enhanced Edition)        ${NC}"
+echo -e "${CYAN}========================================================${NC}"
+echo ""
+
+# Validate cookie before doing anything else
+echo -e "${BLUE}Validating cookie configuration...${NC}"
+if ! validate_cookie; then
+    exit 1
+fi
+echo ""
+
+# Check if we're in the correct directory (should contain JSON files)
+if ! ls model_*.json 1> /dev/null 2>&1; then
+    echo -e "${RED}Error: No model JSON files found. Run the metadata downloader first (Step 1).${NC}"
+    exit 1
+fi
+
+# Check if jq is available
+JQ_CMD="jq"
+if ! command -v jq &> /dev/null; then
+    if [[ -f "${SCRIPT_DIR}/jq.exe" ]]; then
+        JQ_CMD="${SCRIPT_DIR}/jq.exe"
+    elif [[ -f "${SCRIPT_DIR}/jq" ]]; then
+        JQ_CMD="${SCRIPT_DIR}/jq"
+    elif [[ -f "../jq.exe" ]]; then
+        JQ_CMD="../jq.exe"
+    elif [[ -f "../jq" ]]; then
+        JQ_CMD="../jq"
+    elif [[ -f "./jq.exe" ]]; then
+        JQ_CMD="./jq.exe"
+    elif [[ -f "./jq" ]]; then
+        JQ_CMD="./jq"
+    else
+        echo -e "${RED}Error: jq not found. Download from https://github.com/stedolan/jq/releases${NC}"
+        echo "Place jq or jq.exe in the same directory as this script"
+        exit 1
+    fi
+fi
+
+# Create STL downloads directory
+mkdir -p stl_files
+cd stl_files || exit
+cleanup_orphan_part_files
+
+load_model_ids_filter
+
+# Count JSON files selected for this run.
+shopt -s nullglob
+model_json_files=()
+for json_candidate in ../model_*.json; do
+    json_model_id=$(basename "$json_candidate" | sed 's/model_//; s/.json//')
+    if is_model_id_selected "$json_model_id"; then
+        model_json_files+=("$json_candidate")
+    fi
+done
+shopt -u nullglob
+
+json_count=${#model_json_files[@]}
+
+if [[ $json_count -eq 0 ]]; then
+    if [[ "$MODEL_IDS_FILTER_ACTIVE" -eq 1 ]]; then
+        echo -e "${RED}Error: No model JSON files matched the selected batch. Run Step 1 for this batch first.${NC}"
+    else
+        echo -e "${RED}Error: No JSON files found${NC}"
+    fi
+    exit 1
+fi
+
+echo -e "${BLUE}Found $json_count JSON files to process${NC}"
+if [[ "$MODEL_IDS_FILTER_ACTIVE" -eq 1 ]]; then
+    echo -e "${BLUE}Batch filter active: processing only the selected model IDs${NC}"
+fi
+echo -e "${BLUE}Output folders: $FOLDER_NAMING_FORMAT (readable names; legacy model_<id> still supported)${NC}"
+echo -e "${CYAN}Minimum free space required before each write: ${MIN_FREE_SPACE_MB} MB${NC}"
+
+if ! ensure_min_free_space "." "$MIN_FREE_SPACE_MB" "before starting download loop"; then
+    abort_no_space "before starting download loop"
+fi
+
+# TEST MODE - Download just one file to verify everything works
+if [[ "$TEST_MODE" == true ]]; then
+    echo -e "${YELLOW}=======================================${NC}"
+    echo -e "${YELLOW}   RUNNING IN TEST MODE${NC}"
+    echo -e "${YELLOW}=======================================${NC}"
+    echo "Testing with first available model to verify cookie and setup..."
+    emit_progress_event "{\"step\":\"test\",\"event\":\"start\"}"
+    echo ""
+    
+    # Find first JSON file with download URLs
+    for json_file in "${model_json_files[@]}"; do
+        model_id=$(basename "$json_file" | sed 's/model_//; s/.json//')
+        test_line=$($JQ_CMD -r '.files.items[]? | select(.download_url != null and .download_url != "") | "\(.filename // "")|\(.download_url)"' "$json_file" 2>/dev/null | head -1)
+
+        if [[ -n "$test_line" ]]; then
+            echo -e "${BLUE}Testing with model $model_id${NC}"
+            
+            # Get first file from this model
+            filename=$(echo "$test_line" | cut -d'|' -f1 | tr -d '\r' | xargs)
+            download_url=$(echo "$test_line" | cut -d'|' -f2 | tr -d '\r' | xargs)
+
+            if [[ -z "$download_url" || "$download_url" == "null" ]]; then
+                continue
+            fi
+            
+            echo -e "  Downloading: ${CYAN}$filename${NC}"
+            
+            test_file="test_download_${model_id}.tmp"
+
+            echo ""
+
+            if download_file_with_guards "$download_url" "$test_file" "application/octet-stream" "running test mode download" "$(basename "$test_file")"; then
+                file_size=$(get_file_size "$test_file")
+                echo -e "${GREEN}[OK] TEST PASSED${NC}"
+                echo -e "  Successfully downloaded ${CYAN}$filename${NC} (${file_size} bytes)"
+                echo "  File appears to be valid (not an error page)"
+                echo ""
+                echo -e "${GREEN}Cookie is working! You can now run the full download:${NC}"
+                echo "  bash $(basename "$0")"
+                rm -f "$test_file"
+                emit_progress_event "{\"step\":\"test\",\"event\":\"done\"}"
+                exit 0
+            fi
+
+            if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
+                rm -f "$test_file" "${test_file}.part"
+                emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
+                abort_no_space "running test mode download"
+            fi
+
+            if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]] && is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
+                echo -e "${RED}[FAIL] TEST FAILED${NC}"
+                echo -e "${RED}Downloaded file is an HTML error page, not the actual file${NC}"
+                echo ""
+                show_error_content "$DOWNLOAD_LAST_TMP_FILE"
+                echo ""
+                echo -e "${YELLOW}Common causes:${NC}"
+                echo "  1. Cookie expired - get a fresh cookie from browser"
+                echo "  2. Missing cf_clearance token - copy cookie from download request, not page view"
+                echo "  3. Not logged in - make sure you're logged into MyMiniFactory in browser"
+                echo "  4. Cookie formatting error - check for extra quotes or special characters"
+                echo ""
+                echo -e "${CYAN}How to get a fresh cookie:${NC}"
+                echo "  1. Open MyMiniFactory in browser, log in"
+                echo "  2. Download any file from any model"
+                echo "  3. F12 -> Network -> Find 'download' request"
+                echo "  4. Copy the Cookie header value"
+                echo "  5. Paste into script (no extra quotes)"
+            else
+                echo -e "${RED}[FAIL] TEST FAILED${NC}"
+                echo -e "${RED}Download failed (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, HTTP ${DOWNLOAD_LAST_HTTP_CODE:-unknown})${NC}"
+                echo "Check cookie validity and your network connection."
+            fi
+
+            rm -f "$test_file" "${test_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
+            emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
+            exit 1
+        else
+            is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
+            if [[ "$is_bought" == "false" ]]; then
+                echo -e "${YELLOW}! Skipping model $model_id in test mode: object is not in your library (is_bought=false).${NC}"
+            fi
+        fi
+    done
+    
+    echo -e "${RED}No downloadable files found for testing${NC}"
+    echo -e "${YELLOW}If the listed models are not owned, this is expected. Use owned models for --test.${NC}"
+    emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
+    exit 1
+fi
+
+# FULL DOWNLOAD MODE
+echo -e "${BLUE}Extracting download URLs, images, and creating per-model ZIP files...${NC}"
+echo -e "${YELLOW}This will take a while - respecting rate limits${NC}"
+echo -e "${YELLOW}Press Ctrl+C to stop at any time${NC}"
+echo ""
+
+current_file=0
+total_downloads=0
+successful_downloads=0
+consecutive_failures=0
+compact_json_written=0
+zip_created=0
+models_zip_skipped=0
+not_owned_skipped=0
+models_without_file_downloads=0
+
+ASSET_PROGRESS_TOTAL_UNITS=0
+ASSET_PROGRESS_DONE_UNITS=0
+ASSET_PROGRESS_MODELS_DONE=0
+for json_file in "${model_json_files[@]}"; do
+    model_id_for_count=$(basename "$json_file" | sed 's/model_//; s/.json//')
+    model_units=$(count_model_progress_units "$json_file" "$model_id_for_count")
+    if [[ "$model_units" =~ ^[0-9]+$ ]]; then
+        ASSET_PROGRESS_TOTAL_UNITS=$((ASSET_PROGRESS_TOTAL_UNITS + model_units))
+    fi
+done
+if [[ "$ASSET_PROGRESS_TOTAL_UNITS" -eq 0 ]]; then
+    ASSET_PROGRESS_TOTAL_UNITS="$json_count"
+fi
+emit_asset_progress_start "$json_count" "$ASSET_PROGRESS_TOTAL_UNITS"
+
+# Process each JSON file
+for json_file in "${model_json_files[@]}"; do
+    current_file=$((current_file + 1))
+    model_id=$(basename "$json_file" | sed 's/model_//; s/.json//')
+
+    emit_asset_progress_model_start "$model_id" "$current_file" "$json_count"
+    echo -e "${BLUE}[$current_file/$json_count] Processing model $model_id...${NC}"
+
+    is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
+    downloadable_file_count=$($JQ_CMD -r '[.files.items[]? | .download_url | select(. != null and . != "")] | length' "$json_file" 2>/dev/null)
+    if [[ ! "$downloadable_file_count" =~ ^[0-9]+$ ]]; then
+        downloadable_file_count=0
+    fi
+
+    # Copyright and ownership guard: if no downloadable STL/ZIP URLs exist,
+    # do not create any output for this model (no metadata, no images).
+    if [[ "$downloadable_file_count" -eq 0 ]]; then
+        if [[ "$is_bought" == "false" ]]; then
+            not_owned_skipped=$((not_owned_skipped + 1))
+            models_without_file_downloads=$((models_without_file_downloads + 1))
+            echo -e "${YELLOW}  ! Object is not in your library (is_bought=false). Skipping model output for model $model_id.${NC}"
+        else
+            models_without_file_downloads=$((models_without_file_downloads + 1))
+            echo -e "${YELLOW}  ! No downloadable STL/ZIP URLs found in metadata. Skipping model output.${NC}"
+        fi
+        emit_asset_progress_unit "$model_id" "model" "skipped"
+        emit_asset_progress_model_done "$model_id"
+        echo ""
+        continue
+    fi
+
+    # Create directory for this model (readable name; falls back to legacy model_<id> if present)
+    model_dir=$(resolve_model_dir "$model_id" "$json_file")
+    mkdir -p "$model_dir"
+    if [[ "$model_dir" != "model_${model_id}" ]]; then
+        echo -e "  ${CYAN}Using folder: ${model_dir}/${NC}"
+    fi
+    model_file_successful_downloads=0
+    model_assets_complete=0
+    existing_assets_archive=""
+
+    if model_assets_already_archived "$model_dir" "$json_file" "$model_id"; then
+        existing_assets_archive=$(find_existing_assets_archive "$model_dir" "$(get_model_archive_basename "$json_file" "$model_id")")
+        existing_archive_size=$(get_file_size "$existing_assets_archive")
+        echo -e "  ${GREEN}[SKIP] Model assets already archived in $(basename "$existing_assets_archive") (${existing_archive_size} bytes) — skipping STL/ZIP re-download.${NC}"
+        model_file_successful_downloads=$downloadable_file_count
+        model_assets_complete=1
+        models_zip_skipped=$((models_zip_skipped + 1))
+        successful_downloads=$((successful_downloads + downloadable_file_count))
+    fi
+
+    # Extract downloadable files from metadata
+    download_data=$($JQ_CMD -r '.files.items[]? | "\(.filename // "")|\(.download_url // "")"' "$json_file" 2>/dev/null)
+
+    if [[ -z "$download_data" ]]; then
+        echo -e "${YELLOW}  ! No STL/ZIP file URLs found in metadata. Skipping model output.${NC}"
+        rm -rf "$model_dir"
+        models_without_file_downloads=$((models_without_file_downloads + 1))
+        emit_asset_progress_unit "$model_id" "model" "skipped"
+        emit_asset_progress_model_done "$model_id"
+        echo ""
+        continue
+    elif [[ "$model_assets_complete" -eq 0 ]]; then
+        while IFS='|' read -r filename download_url; do
+            if [[ -z "$filename" ]]; then
+                continue
+            fi
+
+            filename=$(echo "$filename" | tr -d '\r' | xargs)
+            filename=$(sanitize_filename "$filename")
+            download_url=$(echo "$download_url" | tr -d '\r' | xargs)
+
+            if [[ -z "$download_url" || "$download_url" == "null" ]]; then
+                echo -e "  ${YELLOW}! Skipping $filename: no download URL (likely not owned or unavailable).${NC}"
+                continue
+            fi
+
+            canonical_output="${model_dir}/${filename}"
+
+            if [[ -f "$canonical_output" ]] && is_valid_download_file "$canonical_output" "$filename"; then
+                file_size=$(get_file_size "$canonical_output")
+                echo -e "  ${GREEN}[SKIP] Already downloaded: $(basename "$canonical_output") (${file_size} bytes)${NC}"
+                successful_downloads=$((successful_downloads + 1))
+                model_file_successful_downloads=$((model_file_successful_downloads + 1))
+                consecutive_failures=0
+                emit_asset_progress_unit "$model_id" "file" "skipped"
+                continue
+            fi
+
+            if [[ -e "$canonical_output" ]]; then
+                echo -e "  ${YELLOW}! Removing invalid existing file: $(basename "$canonical_output")${NC}"
+                rm -f "$canonical_output"
+            fi
+
+            output_file="$(unique_output_path "$model_dir" "$filename")"
+
+            total_downloads=$((total_downloads + 1))
+
+            echo -e "  ${YELLOW}Downloading file: $(basename "$output_file")${NC}"
+
+            if download_file_with_guards "$download_url" "$output_file" "application/octet-stream" "downloading file $(basename "$output_file")" "$(basename "$output_file")"; then
+                file_size=$(get_file_size "$output_file")
+                echo -e "  ${GREEN}[OK] Downloaded $(basename "$output_file") (${file_size} bytes)${NC}"
+                successful_downloads=$((successful_downloads + 1))
+                model_file_successful_downloads=$((model_file_successful_downloads + 1))
+                consecutive_failures=0
+                emit_asset_progress_unit "$model_id" "file" "downloaded"
+            else
+                if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
+                    rm -f "$output_file" "${output_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
+                    emit_asset_progress_unit "$model_id" "file" "failed"
+                    abort_no_space "downloading file $(basename "$output_file")"
+                fi
+
+                if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]]; then
+                    if is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
+                        echo -e "  ${RED}[FAIL] Failed: Downloaded HTML error page instead of file${NC}"
+
+                        if [[ $consecutive_failures -eq 0 ]]; then
+                            show_error_content "$DOWNLOAD_LAST_TMP_FILE"
+                        fi
+                    else
+                        echo -e "  ${RED}[FAIL] Failed validation for $(basename "$output_file")${NC}"
+                    fi
+
+                    rm -f "$DOWNLOAD_LAST_TMP_FILE"
+                else
+                    echo -e "  ${RED}[FAIL] Failed to download $(basename "$output_file") (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, HTTP ${DOWNLOAD_LAST_HTTP_CODE:-unknown})${NC}"
+                fi
+
+                consecutive_failures=$((consecutive_failures + 1))
+                rm -f "$output_file" "${output_file}.part"
+                emit_asset_progress_unit "$model_id" "file" "failed"
+
+                if [[ $consecutive_failures -ge $MAX_CONSECUTIVE_FAILURES ]]; then
+                    echo ""
+                    echo -e "${RED}=======================================================${NC}"
+                    echo -e "${RED}STOPPING: $MAX_CONSECUTIVE_FAILURES consecutive failures detected${NC}"
+                    echo -e "${RED}=======================================================${NC}"
+                    echo ""
+                    echo -e "${YELLOW}This indicates a systematic problem (not random failures)${NC}"
+                    echo ""
+                    echo -e "${CYAN}Most likely causes:${NC}"
+                    echo "  1. Cookie expired - get fresh cookie from browser"
+                    echo "  2. Missing cf_clearance token in cookie"
+                    echo "  3. Session logged out - log back into MyMiniFactory"
+                    echo "  4. Account permissions issue"
+                    echo ""
+                    echo -e "${CYAN}To fix:${NC}"
+                    echo "  1. Log into MyMiniFactory in your browser"
+                    echo "  2. Download a file manually to verify access"
+                    echo "  3. Copy fresh cookie from that download request (F12 -> Network)"
+                    echo "  4. Update COOKIE variable in script"
+                    echo "  5. Run in test mode first: bash $(basename "$0") --test"
+                    exit 1
+                fi
+            fi
+
+            sleep "$STL_FILE_DELAY_SEC"
+        done <<< "$download_data"
+    fi
+
+    if [[ "$model_file_successful_downloads" -eq 0 ]]; then
+        echo -e "${YELLOW}  ! No files could be downloaded for model $model_id. Removing metadata/images output for copyright compliance.${NC}"
+        rm -rf "$model_dir"
+        models_without_file_downloads=$((models_without_file_downloads + 1))
+        emit_asset_progress_unit "$model_id" "model" "failed"
+        emit_asset_progress_model_done "$model_id"
+        echo ""
+        continue
+    fi
+
+    # Build compact JSON only when at least one STL/ZIP file was downloaded.
+    if write_compact_model_json "$json_file" "$model_dir" "$model_id"; then
+        compact_json_written=$((compact_json_written + 1))
+        emit_asset_progress_unit "$model_id" "json" "written"
+    else
+        emit_asset_progress_unit "$model_id" "json" "failed"
+    fi
+
+    # Download images only when the model has at least one successfully downloaded file.
+    download_model_images "$json_file" "$model_dir" "$model_id"
+
+    # Compress only model root files to a zip archive; images stay in model_<id>/images
+    if [[ "$model_assets_complete" -eq 1 ]]; then
+        zip_created=$((zip_created + 1))
+        emit_asset_progress_unit "$model_id" "zip" "skipped"
+    elif compress_non_json_assets "$model_dir" "$json_file" "$model_id"; then
+        zip_created=$((zip_created + 1))
+        emit_asset_progress_unit "$model_id" "zip" "created"
+    else
+        emit_asset_progress_unit "$model_id" "zip" "failed"
+    fi
+
+    emit_asset_progress_unit "$model_id" "model" "completed"
+    emit_asset_progress_model_done "$model_id"
+    echo ""
+done
+
+emit_progress_event "{\"step\":\"assets\",\"event\":\"done\",\"totalModels\":$json_count,\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_TOTAL_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
+
+echo -e "${GREEN}=======================================${NC}"
+echo -e "${GREEN}   Download Complete!${NC}"
+echo -e "${GREEN}=======================================${NC}"
+echo -e "${GREEN}Successful downloads: $successful_downloads/$total_downloads files and images${NC}"
+if [[ $((total_downloads - successful_downloads)) -gt 0 ]]; then
+    echo -e "${YELLOW}Failed downloads: $((total_downloads - successful_downloads))${NC}"
+fi
+if [[ "$not_owned_skipped" -gt 0 ]]; then
+    echo -e "${YELLOW}Skipped models not owned: $not_owned_skipped${NC}"
+fi
+if [[ "$models_without_file_downloads" -gt 0 ]]; then
+    echo -e "${YELLOW}Skipped model outputs with zero downloaded files: $models_without_file_downloads${NC}"
+fi
+if [[ "$models_zip_skipped" -gt 0 ]]; then
+    echo -e "${GREEN}Models skipped (assets ZIP already present): $models_zip_skipped${NC}"
+fi
+echo -e "${GREEN}Compact JSON files written: $compact_json_written${NC}"
+echo -e "${GREEN}ZIP archives created: $zip_created${NC}"
+echo -e "${BLUE}Output structure: stl_files/<id>_<model_name>/model_<id>.json + <model_name>.zip + images/${NC}"
+echo ""
+
+echo "Sample of generated directories:"
+find . -name "model_*" -type d 2>/dev/null | head -5 | while read -r dir; do
+    file_count=$(find "$dir" -maxdepth 1 -type f | wc -l)
+    echo "  $dir: $file_count files"
+done
+</file>
+
 <file path="gui/app.js">
 (() => {
     if (window.__MMF_APP_BOOTSTRAPPED__) {
@@ -118465,6 +119951,11 @@ const elements = {
     clearLogBtn: document.getElementById("clearLogBtn"),
     openFilesFolderBtn: document.getElementById("openFilesFolderBtn"),
     runStatus: document.getElementById("runStatus"),
+    pipelineProgressPanel: document.getElementById("pipelineProgressPanel"),
+    pipelineProgressLabel: document.getElementById("pipelineProgressLabel"),
+    pipelineProgressPercent: document.getElementById("pipelineProgressPercent"),
+    pipelineProgressBar: document.getElementById("pipelineProgressBar"),
+    pipelineProgressDetail: document.getElementById("pipelineProgressDetail"),
     runLog: document.getElementById("runLog"),
     jsonFileSelect: document.getElementById("jsonFileSelect"),
     refreshJsonListBtn: document.getElementById("refreshJsonListBtn"),
@@ -118499,9 +119990,9 @@ let runtimeInfoCache = null;
 let modelIdEntries = [];
 let categoryTaxonomyItems = [];
 let categorySelectionMap = new Map();
-const MODEL_LIST_UI_PAGE_SIZE = 25;
+const MODEL_LIST_UI_PAGE_SIZE = 20;
 const CATALOG_LOAD_MODES = ["listing", "library", "creator"];
-const BATCH_SIZE_OPTIONS = ["25", "50", "100", "all"];
+const BATCH_SIZE_OPTIONS = ["10", "25", "50", "100", "all"];
 const BATCH_STATUS_OPTIONS = ["idle", "running", "completed", "failed", "interrupted"];
 const DOWNLOAD_HISTORY_LIMIT = 20;
 let modelListUiPage = 1;
@@ -118510,6 +120001,30 @@ let downloadRootHistory = [];
 let lastStableDownloadRoot = "";
 let batchProgressState = createDefaultBatchProgressState();
 let activeBatchPlan = null;
+const sessionPipelineCompletedIds = new Set();
+let pipelineProgressState = createDefaultPipelineProgressState();
+
+function createDefaultPipelineProgressState() {
+    return {
+        visible: false,
+        phase: "idle",
+        percent: 0,
+        label: "",
+        detail: "",
+        testDone: false,
+        metadataTotal: 0,
+        metadataDone: 0,
+        batchTotal: 0,
+        batchModelsDone: 0,
+        step2CurrentModelId: "",
+        assetWorkTotal: 0,
+        assetWorkDone: 0,
+        assetModelsTotal: 0,
+        assetModelsDone: 0,
+        assetCurrentModelIndex: 0,
+        assetCurrentModelId: ""
+    };
+}
 
 function createDefaultBatchProgressState() {
     return {
@@ -119194,6 +120709,7 @@ function reconcileBatchProgressWithCurrentIds() {
     }
 
     updateBatchStatusUi();
+    renderModelIdList();
     renderDownloadRootHistory();
 }
 
@@ -119296,8 +120812,488 @@ function rememberDownloadRoot(pathValue, options = {}) {
     }
 }
 
+function removeDownloadRootFromHistory(pathValue, options = {}) {
+    const normalizedPath = String(pathValue || "").trim();
+    if (!normalizedPath) {
+        return false;
+    }
+
+    const isLikelyWindowsPath = /^[a-z]:\\/i.test(normalizedPath) || normalizedPath.includes("\\");
+    const caseSensitive = !(runtimePlatform === "win32" || isLikelyWindowsPath);
+    const beforeCount = sanitizeDownloadRootHistory(downloadRootHistory).length;
+
+    downloadRootHistory = sanitizeDownloadRootHistory(downloadRootHistory)
+        .filter((entry) => {
+            if (caseSensitive) {
+                return entry !== normalizedPath;
+            }
+
+            return entry.toLowerCase() !== normalizedPath.toLowerCase();
+        });
+
+    const removed = beforeCount !== downloadRootHistory.length;
+    if (removed) {
+        renderDownloadRootHistory();
+        if (options.save !== false) {
+            scheduleSettingsSave();
+        }
+    }
+
+    return removed;
+}
+
 function isDownloadRootLocked() {
     return Boolean(activeRunId) || pipelineRunning || batchProgressState.inProgress;
+}
+
+function isModelListMutationLocked() {
+    return isDownloadRootLocked();
+}
+
+function getModelEntryLabelById(modelId) {
+    const entry = modelIdEntries.find((item) => item && item.id === modelId);
+    if (!entry) {
+        return modelId;
+    }
+
+    return entry.name ? `${entry.name} (${modelId})` : modelId;
+}
+
+function getPipelineBatchIdSet() {
+    if (activeBatchPlan && Array.isArray(activeBatchPlan.ids)) {
+        return new Set(sanitizeNumericIdList(activeBatchPlan.ids));
+    }
+
+    if (batchProgressState.inProgress) {
+        return new Set(sanitizeNumericIdList(batchProgressState.inProgressIds));
+    }
+
+    return new Set();
+}
+
+function isModelRowCompletedForDisplay(modelId) {
+    return getCompletedModelIdSet().has(modelId) || sessionPipelineCompletedIds.has(modelId);
+}
+
+function stripAnsiFromLogLine(text) {
+    return String(text || "").replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function clampPercent(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        return 0;
+    }
+
+    return Math.max(0, Math.min(100, parsed));
+}
+
+function getProgressEventFromLogLine(line) {
+    const cleanLine = stripAnsiFromLogLine(line).trim();
+    if (!cleanLine.startsWith("MMF_PROGRESS ")) {
+        return null;
+    }
+
+    try {
+        const event = JSON.parse(cleanLine.slice("MMF_PROGRESS ".length));
+        return event && typeof event === "object" ? event : null;
+    } catch (_error) {
+        return null;
+    }
+}
+
+function filterProgressEventsFromLog(text) {
+    return String(text || "")
+        .split(/\r?\n/)
+        .filter((line) => !stripAnsiFromLogLine(line).trim().startsWith("MMF_PROGRESS "))
+        .join("\n");
+}
+
+function coerceProgressInteger(value, fallback = 0) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed) || parsed < 0) {
+        return fallback;
+    }
+
+    return parsed;
+}
+
+function resetPipelineProgressUi() {
+    pipelineProgressState = createDefaultPipelineProgressState();
+    sessionPipelineCompletedIds.clear();
+    renderPipelineProgressUi();
+}
+
+function beginPipelineProgressUi(batchPlan, options = {}) {
+    const batchIds = sanitizeNumericIdList(batchPlan && batchPlan.ids ? batchPlan.ids : []);
+    sessionPipelineCompletedIds.clear();
+    pipelineProgressState = {
+        visible: true,
+        phase: options.phase || "starting",
+        percent: 0,
+        label: "Preparing pipeline…",
+        detail: batchIds.length > 0
+            ? `Batch of ${batchIds.length} model(s). Metadata download starts next.`
+            : "Waiting for workflow output…",
+        testDone: false,
+        metadataTotal: batchIds.length,
+        metadataDone: 0,
+        batchTotal: batchIds.length,
+        batchModelsDone: 0,
+        step2CurrentModelId: "",
+        assetWorkTotal: 0,
+        assetWorkDone: 0,
+        assetModelsTotal: batchIds.length,
+        assetModelsDone: 0,
+        assetCurrentModelIndex: 0,
+        assetCurrentModelId: ""
+    };
+    renderPipelineProgressUi();
+}
+
+function setPipelineProgressPhase(phase, label, detail) {
+    pipelineProgressState.visible = true;
+    pipelineProgressState.phase = phase;
+    if (label) {
+        pipelineProgressState.label = label;
+    }
+    if (detail) {
+        pipelineProgressState.detail = detail;
+    }
+    renderPipelineProgressUi();
+}
+
+function computePipelineProgressPercent() {
+    const {
+        phase,
+        metadataTotal,
+        metadataDone,
+        batchTotal,
+        batchModelsDone,
+        testDone,
+        assetWorkTotal,
+        assetWorkDone
+    } = pipelineProgressState;
+
+    if (phase === "metadata") {
+        if (metadataTotal > 0) {
+            return clampPercent(Math.round((metadataDone / metadataTotal) * 30));
+        }
+
+        return 3;
+    }
+
+    if (phase === "step2-test") {
+        return testDone ? 40 : 34;
+    }
+
+    if (phase === "step2-full") {
+        if (assetWorkTotal > 0) {
+            return clampPercent(40 + Math.round((Math.min(assetWorkDone, assetWorkTotal) / assetWorkTotal) * 56));
+        }
+
+        if (batchTotal > 0) {
+            return clampPercent(40 + Math.round((batchModelsDone / batchTotal) * 56));
+        }
+
+        return 40;
+    }
+
+    if (phase === "done") {
+        return 100;
+    }
+
+    if (phase === "failed" || phase === "interrupted") {
+        return pipelineProgressState.percent;
+    }
+
+    return clampPercent(pipelineProgressState.percent);
+}
+
+function renderPipelineProgressUi() {
+    if (!elements.pipelineProgressPanel) {
+        return;
+    }
+
+    if (!pipelineProgressState.visible) {
+        elements.pipelineProgressPanel.classList.add("hidden");
+        return;
+    }
+
+    elements.pipelineProgressPanel.classList.remove("hidden");
+    const computedPercent = computePipelineProgressPercent();
+    pipelineProgressState.percent = pipelineProgressState.phase === "done"
+        ? 100
+        : Math.max(clampPercent(pipelineProgressState.percent), computedPercent);
+
+    if (elements.pipelineProgressLabel) {
+        elements.pipelineProgressLabel.textContent = pipelineProgressState.label || "Pipeline progress";
+    }
+
+    if (elements.pipelineProgressPercent) {
+        elements.pipelineProgressPercent.textContent = `${pipelineProgressState.percent}%`;
+    }
+
+    if (elements.pipelineProgressBar) {
+        elements.pipelineProgressBar.style.width = `${pipelineProgressState.percent}%`;
+        const progressTrack = elements.pipelineProgressBar.parentElement;
+        if (progressTrack) {
+            progressTrack.setAttribute("aria-valuenow", String(pipelineProgressState.percent));
+            progressTrack.setAttribute("aria-valuetext", `${pipelineProgressState.percent}% - ${pipelineProgressState.detail || pipelineProgressState.label || "Pipeline progress"}`);
+        }
+    }
+
+    if (elements.pipelineProgressDetail) {
+        elements.pipelineProgressDetail.textContent = pipelineProgressState.detail || "";
+    }
+}
+
+function markPipelineBatchModelDone(modelId) {
+    const normalizedId = String(modelId || "").trim();
+    const batchIds = getPipelineBatchIdSet();
+    if (!/^\d+$/.test(normalizedId) || (batchIds.size > 0 && !batchIds.has(normalizedId))) {
+        return;
+    }
+
+    if (sessionPipelineCompletedIds.has(normalizedId)) {
+        return;
+    }
+
+    sessionPipelineCompletedIds.add(normalizedId);
+    pipelineProgressState.batchModelsDone = sessionPipelineCompletedIds.size;
+    pipelineProgressState.label = "Downloading and packaging models";
+    pipelineProgressState.detail = batchIds.size > 0
+        ? `Model ${sessionPipelineCompletedIds.size}/${batchIds.size} finished (ZIP ready): ${getModelEntryLabelById(normalizedId)}`
+        : `Model finished (ZIP ready): ${getModelEntryLabelById(normalizedId)}`;
+    renderPipelineProgressUi();
+    renderModelIdList();
+}
+
+function handlePipelineProgressEvent(event) {
+    if (!event || typeof event !== "object") {
+        return false;
+    }
+
+    const step = typeof event.step === "string" ? event.step : "";
+    const eventName = typeof event.event === "string" ? event.event : "";
+    const modelId = typeof event.modelId === "string" ? event.modelId : String(event.modelId || "");
+
+    if (step === "metadata") {
+        pipelineProgressState.visible = true;
+        pipelineProgressState.phase = "metadata";
+
+        const total = coerceProgressInteger(event.total, pipelineProgressState.metadataTotal);
+        if (total > 0) {
+            pipelineProgressState.metadataTotal = total;
+        }
+
+        if (eventName === "start") {
+            pipelineProgressState.metadataDone = 0;
+            pipelineProgressState.label = "Downloading JSON metadata";
+            pipelineProgressState.detail = `Preparing ${pipelineProgressState.metadataTotal || "?"} metadata file(s)...`;
+        } else if (eventName === "item") {
+            const current = coerceProgressInteger(event.current, pipelineProgressState.metadataDone);
+            const status = typeof event.status === "string" ? event.status : "";
+            const isFinished = status === "downloaded" || status === "skipped" || status === "failed";
+            pipelineProgressState.metadataDone = isFinished
+                ? Math.max(pipelineProgressState.metadataDone, current)
+                : Math.max(pipelineProgressState.metadataDone, Math.max(current - 1, 0));
+            pipelineProgressState.label = "Downloading JSON metadata";
+            pipelineProgressState.detail = isFinished
+                ? `Metadata ${pipelineProgressState.metadataDone}/${pipelineProgressState.metadataTotal || "?"}: ${status} ${getModelEntryLabelById(modelId)}`
+                : `Metadata ${current}/${pipelineProgressState.metadataTotal || "?"}: ${getModelEntryLabelById(modelId)}`;
+        } else if (eventName === "done") {
+            pipelineProgressState.metadataDone = pipelineProgressState.metadataTotal || pipelineProgressState.metadataDone;
+            pipelineProgressState.label = "Metadata complete";
+            pipelineProgressState.detail = `${pipelineProgressState.metadataDone} metadata file(s) ready.`;
+        }
+
+        renderPipelineProgressUi();
+        return true;
+    }
+
+    if (step === "test") {
+        pipelineProgressState.visible = true;
+        pipelineProgressState.phase = "step2-test";
+        pipelineProgressState.label = eventName === "failed" ? "Step 2 test failed" : "Step 2 test run";
+        pipelineProgressState.testDone = eventName === "done";
+        pipelineProgressState.detail = eventName === "done"
+            ? "Cookie test passed. Full download can start."
+            : eventName === "failed"
+                ? "Cookie test failed. Review the run log for the exact reason."
+                : "Validating cookie with a single guarded download...";
+        renderPipelineProgressUi();
+        return true;
+    }
+
+    if (step === "assets") {
+        pipelineProgressState.visible = true;
+        pipelineProgressState.phase = "step2-full";
+
+        const totalModels = coerceProgressInteger(event.totalModels, pipelineProgressState.assetModelsTotal || pipelineProgressState.batchTotal);
+        const workTotal = coerceProgressInteger(event.workTotal, pipelineProgressState.assetWorkTotal);
+        const workDone = coerceProgressInteger(event.workDone, pipelineProgressState.assetWorkDone);
+        const modelsDone = coerceProgressInteger(event.modelsDone, pipelineProgressState.assetModelsDone);
+
+        if (totalModels > 0) {
+            pipelineProgressState.assetModelsTotal = totalModels;
+            pipelineProgressState.batchTotal = totalModels;
+        }
+        if (workTotal > 0) {
+            pipelineProgressState.assetWorkTotal = workTotal;
+        }
+        pipelineProgressState.assetWorkDone = Math.max(pipelineProgressState.assetWorkDone, workDone);
+        pipelineProgressState.assetModelsDone = Math.max(pipelineProgressState.assetModelsDone, modelsDone);
+        pipelineProgressState.batchModelsDone = pipelineProgressState.assetModelsDone;
+
+        if (eventName === "start") {
+            pipelineProgressState.assetWorkDone = 0;
+            pipelineProgressState.assetModelsDone = 0;
+            pipelineProgressState.batchModelsDone = 0;
+            pipelineProgressState.label = "Preparing model downloads";
+            pipelineProgressState.detail = `${pipelineProgressState.assetModelsTotal || "?"} model(s), ${pipelineProgressState.assetWorkTotal || "?"} tracked work unit(s).`;
+        } else if (eventName === "model-start") {
+            pipelineProgressState.assetCurrentModelIndex = coerceProgressInteger(event.currentModel, pipelineProgressState.assetCurrentModelIndex);
+            pipelineProgressState.assetCurrentModelId = modelId;
+            pipelineProgressState.step2CurrentModelId = modelId;
+            pipelineProgressState.label = "Downloading and packaging models";
+            pipelineProgressState.detail = `Model ${pipelineProgressState.assetCurrentModelIndex || "?"}/${pipelineProgressState.assetModelsTotal || "?"}: ${getModelEntryLabelById(modelId)}`;
+        } else if (eventName === "unit") {
+            const kind = typeof event.kind === "string" ? event.kind : "work";
+            const status = typeof event.status === "string" ? event.status : "done";
+            pipelineProgressState.label = "Downloading and packaging models";
+            pipelineProgressState.detail = `${kind} ${status} for ${getModelEntryLabelById(modelId)} (${pipelineProgressState.assetWorkDone}/${pipelineProgressState.assetWorkTotal || "?"})`;
+        } else if (eventName === "model-done") {
+            markPipelineBatchModelDone(modelId);
+            pipelineProgressState.assetModelsDone = Math.max(pipelineProgressState.assetModelsDone, modelsDone);
+            pipelineProgressState.batchModelsDone = pipelineProgressState.assetModelsDone;
+        } else if (eventName === "done") {
+            pipelineProgressState.assetWorkDone = pipelineProgressState.assetWorkTotal || pipelineProgressState.assetWorkDone;
+            pipelineProgressState.assetModelsDone = pipelineProgressState.assetModelsTotal || pipelineProgressState.assetModelsDone;
+            pipelineProgressState.batchModelsDone = pipelineProgressState.assetModelsDone;
+            pipelineProgressState.step2CurrentModelId = "";
+            pipelineProgressState.label = "Step 2 finished";
+            pipelineProgressState.detail = "All selected model folders were processed for this run.";
+        }
+
+        renderPipelineProgressUi();
+        renderModelIdList();
+        return true;
+    }
+
+    return false;
+}
+
+function feedPipelineProgressFromLog(text) {
+    if (!pipelineProgressState.visible || !text) {
+        return;
+    }
+
+    const lines = String(text).split(/\r?\n/);
+    lines.forEach((rawLine) => {
+        const line = stripAnsiFromLogLine(rawLine).trim();
+        if (!line) {
+            return;
+        }
+
+        const progressEvent = getProgressEventFromLogLine(line);
+        if (progressEvent && handlePipelineProgressEvent(progressEvent)) {
+            return;
+        }
+
+        const metadataTotalMatch = line.match(/Starting download of (\d+) model metadata/i);
+        if (metadataTotalMatch) {
+            pipelineProgressState.metadataTotal = Number.parseInt(metadataTotalMatch[1], 10) || pipelineProgressState.metadataTotal;
+            pipelineProgressState.phase = "metadata";
+            pipelineProgressState.label = "Downloading JSON metadata";
+            pipelineProgressState.detail = `Preparing ${pipelineProgressState.metadataTotal} metadata file(s)…`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        const metadataProgressMatch = line.match(/\[(\d+)\/(\d+)\].*model\s+(\d+)/i);
+        if (metadataProgressMatch) {
+            const current = Number.parseInt(metadataProgressMatch[1], 10);
+            const total = Number.parseInt(metadataProgressMatch[2], 10);
+            const modelId = metadataProgressMatch[3];
+            const isSkip = /Skipping model/i.test(line);
+            pipelineProgressState.phase = "metadata";
+            pipelineProgressState.metadataTotal = total || pipelineProgressState.metadataTotal;
+            pipelineProgressState.metadataDone = Number.isNaN(current) ? pipelineProgressState.metadataDone : current;
+            pipelineProgressState.label = "Downloading JSON metadata";
+            pipelineProgressState.detail = isSkip
+                ? `Metadata ${pipelineProgressState.metadataDone}/${pipelineProgressState.metadataTotal} — skipped (already exists): ${getModelEntryLabelById(modelId)}`
+                : `Metadata ${pipelineProgressState.metadataDone}/${pipelineProgressState.metadataTotal} — model ${getModelEntryLabelById(modelId)}`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        const metadataSavedMatch = line.match(/Successfully downloaded metadata for model\s+(\d+)/i);
+        if (metadataSavedMatch) {
+            const modelId = metadataSavedMatch[1];
+            const total = pipelineProgressState.metadataTotal || pipelineProgressState.batchTotal;
+            pipelineProgressState.metadataDone = Math.min(
+                total || pipelineProgressState.metadataDone + 1,
+                (pipelineProgressState.metadataDone || 0) + 1
+            );
+            pipelineProgressState.phase = "metadata";
+            pipelineProgressState.label = "Downloading JSON metadata";
+            pipelineProgressState.detail = `Saved metadata for ${getModelEntryLabelById(modelId)} (${pipelineProgressState.metadataDone}/${total || "?"})`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        const jsonCountMatch = line.match(/Found (\d+) JSON files to process/i);
+        if (jsonCountMatch) {
+            pipelineProgressState.phase = "step2-full";
+            pipelineProgressState.label = "Downloading models (STL/ZIP)";
+            pipelineProgressState.detail = `Scanning ${jsonCountMatch[1]} metadata file(s) in the download folder.`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        const processingMatch = line.match(/\[(\d+)\/(\d+)\]\s+Processing model\s+(\d+)/i);
+        if (processingMatch) {
+            const modelId = processingMatch[3];
+            if (pipelineProgressState.step2CurrentModelId
+                && pipelineProgressState.step2CurrentModelId !== modelId) {
+                markPipelineBatchModelDone(pipelineProgressState.step2CurrentModelId);
+            }
+
+            pipelineProgressState.phase = "step2-full";
+            pipelineProgressState.step2CurrentModelId = modelId;
+            pipelineProgressState.label = "Downloading and packaging models";
+            const batchIds = getPipelineBatchIdSet();
+            const inBatch = batchIds.size === 0 || batchIds.has(modelId);
+            const batchPosition = inBatch && batchIds.size > 0
+                ? `${sessionPipelineCompletedIds.size + 1}/${batchIds.size}`
+                : `${processingMatch[1]}/${processingMatch[2]}`;
+            pipelineProgressState.detail = inBatch
+                ? `Working on batch model ${batchPosition}: ${getModelEntryLabelById(modelId)} (files + ZIP)`
+                : `Processing ${processingMatch[1]}/${processingMatch[2]}: ${getModelEntryLabelById(modelId)}`;
+            renderPipelineProgressUi();
+            return;
+        }
+
+        if (/\[OK\]\s+Created .+\.zip/i.test(line) || /\[SKIP\]\s+Model assets already archived/i.test(line)) {
+            if (pipelineProgressState.step2CurrentModelId) {
+                markPipelineBatchModelDone(pipelineProgressState.step2CurrentModelId);
+            }
+            return;
+        }
+
+        if (/Download Complete!/i.test(line)) {
+            if (pipelineProgressState.step2CurrentModelId) {
+                markPipelineBatchModelDone(pipelineProgressState.step2CurrentModelId);
+                pipelineProgressState.step2CurrentModelId = "";
+            }
+
+            pipelineProgressState.phase = "step2-full";
+            pipelineProgressState.label = "Step 2 finished";
+            pipelineProgressState.detail = "All model folders processed for this run.";
+            renderPipelineProgressUi();
+        }
+    });
 }
 
 function unlockModelSearchControls() {
@@ -119448,7 +121444,7 @@ function renderModelIdList() {
         return;
     }
 
-    const completedIds = getCompletedModelIdSet();
+    const listLocked = isModelListMutationLocked();
 
     const pageStart = (modelListUiPage - 1) * MODEL_LIST_UI_PAGE_SIZE;
     const pageEntries = filteredRows.slice(pageStart, pageStart + MODEL_LIST_UI_PAGE_SIZE);
@@ -119459,7 +121455,7 @@ function renderModelIdList() {
 
         const isNumeric = /^\d+$/.test(entry.id);
         const isDuplicate = (countById.get(entry.id) || 0) > 1;
-        const isCompleted = completedIds.has(entry.id);
+        const isCompleted = isModelRowCompletedForDisplay(entry.id);
 
         if (!isNumeric) {
             row.classList.add("model-id-row-invalid");
@@ -119509,6 +121505,10 @@ function renderModelIdList() {
         removeBtn.textContent = "Remove";
         removeBtn.dataset.rowIndex = String(index);
         removeBtn.setAttribute("aria-label", `Remove model ${entry.name || entry.id}`);
+        removeBtn.disabled = listLocked;
+        if (listLocked) {
+            removeBtn.title = "Cannot remove models while a pipeline is running.";
+        }
 
         row.appendChild(idCell);
         row.appendChild(nameCell);
@@ -119609,6 +121609,11 @@ function setupModelIdList() {
 
         const removeBtn = target.closest(".model-id-row-remove");
         if (!removeBtn) {
+            return;
+        }
+
+        if (isModelListMutationLocked()) {
+            setStatus("Cannot remove models while a pipeline is running.", "warn");
             return;
         }
 
@@ -120222,6 +122227,7 @@ function setRunButtonsState() {
     }
 
     unlockModelSearchControls();
+    renderModelIdList();
 
     elements.stopRunBtn.disabled = !running;
 }
@@ -120231,9 +122237,15 @@ function appendRunLog(text, stream = "stdout") {
         return;
     }
 
+    feedPipelineProgressFromLog(text);
+    const visibleText = filterProgressEventsFromLog(text);
+    if (!visibleText.trim()) {
+        return;
+    }
+
     const existing = elements.runLog.textContent === "Run log will appear here." ? "" : elements.runLog.textContent;
     const prefix = stream === "stderr" ? "[stderr] " : "";
-    const incoming = text.endsWith("\n") ? text : `${text}\n`;
+    const incoming = visibleText.endsWith("\n") ? visibleText : `${visibleText}\n`;
     const combined = `${existing}${prefix}${incoming}`;
     const trimmed = combined.length > 120000 ? combined.slice(combined.length - 120000) : combined;
 
@@ -120586,7 +122598,7 @@ function getActiveStlFilesPath() {
     return "";
 }
 
-async function openPathFromUi(pathValue, label) {
+async function openPathFromUi(pathValue, label, options = {}) {
     const targetPath = (pathValue || "").trim();
     if (!targetPath) {
         setStatus(`${label} is empty. Select a folder first.`, "warn");
@@ -120608,7 +122620,26 @@ async function openPathFromUi(pathValue, label) {
             return;
         }
 
-        setStatus(result && result.message ? result.message : `Failed to open ${label}.`, "bad");
+        const message = result && result.message ? result.message : `Failed to open ${label}.`;
+        const pathMissing = /^Path does not exist:/i.test(message);
+        if (pathMissing && options.removeFromHistoryOnMissing !== false) {
+            const removed = removeDownloadRootFromHistory(targetPath);
+            if (removed) {
+                setStatus(`${message} Removed from saved download folders.`, "warn");
+                return;
+            }
+        }
+
+        const pathOutsideWorkspace = /outside the allowed download workspace/i.test(message);
+        if (pathOutsideWorkspace) {
+            setStatus(
+                `${message} Set that folder as "Download folder" first, or pick it with Browse — saved folders in history should open after a restart.`,
+                "warn"
+            );
+            return;
+        }
+
+        setStatus(message, "bad");
     } catch (err) {
         setStatus(`Failed to open ${label}: ${String(err?.message || err)}`, "bad");
     }
@@ -121109,6 +123140,7 @@ function beginBatchPipeline(plan) {
 
     updateBatchStatusUi();
     setRunButtonsState();
+    beginPipelineProgressUi(plan, { phase: "starting" });
 }
 
 function finalizeBatchPipelineSuccess() {
@@ -121129,8 +123161,15 @@ function finalizeBatchPipelineSuccess() {
     }
 
     activeBatchPlan = null;
+    sessionPipelineCompletedIds.clear();
     reconcileBatchProgressWithCurrentIds();
     updateBatchStatusUi();
+    renderModelIdList();
+    pipelineProgressState.phase = "done";
+    pipelineProgressState.label = "Batch completed";
+    pipelineProgressState.detail = "All pipeline steps finished for this batch.";
+    pipelineProgressState.percent = 100;
+    renderPipelineProgressUi();
     scheduleSettingsSave();
 }
 
@@ -121144,6 +123183,12 @@ function finalizeBatchPipelineFailure(message, status = "failed") {
     batchProgressState.lastStatus = BATCH_STATUS_OPTIONS.includes(status) ? status : "failed";
     batchProgressState.lastError = String(message || "Pipeline did not complete.");
     activeBatchPlan = null;
+    sessionPipelineCompletedIds.clear();
+    pipelineProgressState.phase = status === "interrupted" ? "interrupted" : "failed";
+    pipelineProgressState.label = status === "interrupted" ? "Pipeline interrupted" : "Pipeline failed";
+    pipelineProgressState.detail = String(message || "Pipeline did not complete.");
+    renderPipelineProgressUi();
+    renderModelIdList();
 
     updateBatchStatusUi();
     scheduleSettingsSave();
@@ -121207,7 +123252,6 @@ async function executePipeline() {
 
     pipelineRunning = true;
     beginBatchPipeline(batchPlan);
-    setRunButtonsState();
     await saveSettingsNow();
 
     const runTestStep = elements.testModeCheck.checked;
@@ -121228,6 +123272,7 @@ async function executePipeline() {
         finalizeBatchPipelineFailure("Session expired before pipeline start.", "failed");
         pipelineRunning = false;
         setRunButtonsState();
+        resetPipelineProgressUi();
         return;
     }
 
@@ -121235,11 +123280,31 @@ async function executePipeline() {
 
     try {
         for (const step of pipelineSteps) {
+            if (step.key === "step1") {
+                setPipelineProgressPhase(
+                    "metadata",
+                    "Downloading JSON metadata",
+                    `Fetching metadata for ${batchPlan.ids.length} model(s) in this batch…`
+                );
+            } else if (step.key === "step2-test") {
+                setPipelineProgressPhase(
+                    "step2-test",
+                    "Step 2 test run",
+                    "Validating cookie with a single test download…"
+                );
+            } else if (step.key === "step2-full") {
+                setPipelineProgressPhase(
+                    "step2-full",
+                    "Downloading and packaging models",
+                    `Processing batch models (0/${batchPlan.ids.length} ZIP-ready)…`
+                );
+            }
+
             const startResult = await startWorkflowStep(step.key, step.label, {
                 silent: true,
-                configOverride: step.key === "step1"
-                    ? { modelIdsText: batchPlan.ids.join("\n") }
-                    : {}
+                configOverride: {
+                    modelIdsText: batchPlan.ids.join("\n")
+                }
             });
             if (!startResult || !startResult.accepted) {
                 const message = startResult && startResult.message
@@ -121299,6 +123364,9 @@ async function executePipeline() {
     } finally {
         pipelineRunning = false;
         setRunButtonsState();
+        if (!batchProgressState.inProgress && pipelineProgressState.visible && pipelineProgressState.phase !== "done") {
+            resetPipelineProgressUi();
+        }
     }
 }
 
@@ -121931,1200 +123999,6 @@ Promise.resolve()
 })();
 </file>
 
-<file path="mmf_download_stl_files_enhanced.sh">
-#!/bin/bash
-
-# Bulk Downloader — STL/ZIP files, enhanced (Step 2)
-# Downloads actual 3D printable files from a list of model IDs
-# This is STEP 2 - run AFTER the metadata downloader creates JSON files
-# 
-# NEW in Enhanced Edition:
-# - Cookie validation before starting
-# - Automatic HTML error page detection
-# - Test mode to verify setup before bulk download
-# - Better error messages with troubleshooting steps
-# - Stops on systematic errors (e.g., all downloads failing)
-# 
-# Prerequisites:
-# 1. JSON metadata files from Step 1 (model_*.json files)
-# 2. Valid MyMiniFactory session cookie
-# 3. jq installed (JSON parser) - download from https://github.com/stedolan/jq/releases
-#
-# Usage:
-# 1. Run metadata downloader first (Step 1)
-# 2. Update COOKIE variable below with your session cookie
-# 3. Place jq or jq.exe in same directory
-# 4. Run in test mode first: bash download_stl_files.sh --test
-# 5. If test passes, run full: bash download_stl_files.sh
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-# UPDATE THIS: Get your cookie from browser developer tools
-# 
-# HOW TO GET YOUR COOKIE (IMPORTANT - READ CAREFULLY):
-# 1. Open MyMiniFactory in your browser and log in
-# 2. Navigate to any model you own
-# 3. Click download button for any file (Resin, FDM, etc.)
-# 4. Open Developer Tools (F12)
-# 5. Go to Network tab
-# 6. Find the request to "myminifactory.com/download/XXXXX?archive_id=XXXXX"
-# 7. Click on that request
-# 8. Scroll to "Request Headers" section
-# 9. Find the "Cookie:" header
-# 10. Copy ONLY the value (everything after "Cookie: ")
-# 11. Paste below between the single quotes
-#
-# Your cookie MUST include these parts:
-# - PHPSESSID=...
-# - cf_clearance=... (Cloudflare token - CRITICAL)
-# - Various _ga and _pk tracking cookies
-#
-# If you're missing cf_clearance, you'll get "enable Javascript" errors
-COOKIE="${MMF_COOKIE:-REPLACE_WITH_YOUR_ACTUAL_COOKIE_STRING}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# ============================================================================
-
-# Configuration
-TEST_MODE=false
-MAX_CONSECUTIVE_FAILURES=3  # Stop if this many downloads fail in a row
-STL_FILE_DELAY_SEC="${MMF_STL_FILE_DELAY_SEC:-5}"
-IMAGE_DELAY_SEC="${MMF_IMAGE_DELAY_SEC:-3}"
-MIN_FREE_SPACE_MB="${MMF_MIN_FREE_SPACE_MB:-2048}"
-CURL_RETRIES="${MMF_CURL_RETRIES:-2}"
-
-DOWNLOAD_LAST_CURL_EXIT=0
-DOWNLOAD_LAST_HTTP_CODE=""
-DOWNLOAD_LAST_TMP_FILE=""
-DISK_CHECK_WARNED=0
-
-if [[ ! "$MIN_FREE_SPACE_MB" =~ ^[0-9]+$ ]]; then
-    MIN_FREE_SPACE_MB=2048
-fi
-
-if [[ ! "$CURL_RETRIES" =~ ^[0-9]+$ ]]; then
-    CURL_RETRIES=2
-fi
-
-# Parse command line arguments
-if [[ "$1" == "--test" ]]; then
-    TEST_MODE=true
-fi
-
-# Function to validate cookie format
-validate_cookie() {
-    if [[ "$COOKIE" == "REPLACE_WITH_YOUR_ACTUAL_COOKIE_STRING" ]]; then
-        echo -e "${RED}ERROR: Cookie not configured!${NC}"
-        echo "Please update the COOKIE variable in this script with your actual session cookie."
-        echo "See the HOW TO GET YOUR COOKIE instructions in the script."
-        return 1
-    fi
-    
-    if [[ ! "$COOKIE" =~ PHPSESSID ]]; then
-        echo -e "${YELLOW}WARNING: Cookie missing PHPSESSID - this may not work${NC}"
-    fi
-    
-    if [[ ! "$COOKIE" =~ cf_clearance ]]; then
-        echo -e "${YELLOW}WARNING: Cookie missing cf_clearance (Cloudflare token)${NC}"
-        echo "This is the most common cause of 'enable Javascript' errors."
-        echo "Make sure you copied the cookie from a DOWNLOAD request, not a page view."
-        return 1
-    fi
-    
-    echo -e "${GREEN}[OK] Cookie format looks valid${NC}"
-    return 0
-}
-
-# Function to check if downloaded file is an HTML error page
-is_html_error() {
-    local file="$1"
-    
-    if [[ ! -f "$file" ]] || [[ ! -s "$file" ]]; then
-        return 1
-    fi
-    
-    # Check if file starts with HTML tags or common error messages
-    if head -20 "$file" | grep -qi "<!DOCTYPE\|<html\|enable javascript\|cloudflare"; then
-        return 0
-    fi
-    
-    return 1
-}
-
-# Function to display error page content
-show_error_content() {
-    local file="$1"
-    echo -e "${CYAN}Error page content (first 20 lines):${NC}"
-    head -20 "$file" | sed 's/^/  /'
-}
-
-get_file_size() {
-    local file="$1"
-    stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo "unknown"
-}
-
-get_available_kb() {
-    local probe_path="$1"
-    local check_path="$probe_path"
-
-    if [[ -z "$check_path" ]]; then
-        check_path="."
-    fi
-
-    if [[ ! -d "$check_path" ]]; then
-        check_path="$(dirname "$check_path")"
-    fi
-
-    if command -v df >/dev/null 2>&1; then
-        df -Pk "$check_path" 2>/dev/null | awk 'NR==2 {print $4}'
-        return
-    fi
-
-    echo ""
-}
-
-ensure_min_free_space() {
-    local probe_path="$1"
-    local required_mb="$2"
-    local context="$3"
-
-    if [[ "$required_mb" -le 0 ]]; then
-        return 0
-    fi
-
-    local available_kb
-    available_kb="$(get_available_kb "$probe_path")"
-
-    if [[ ! "$available_kb" =~ ^[0-9]+$ ]]; then
-        if [[ "$DISK_CHECK_WARNED" -eq 0 ]]; then
-            echo -e "${YELLOW}! Could not determine free disk space on this system. Continuing without proactive disk check.${NC}"
-            DISK_CHECK_WARNED=1
-        fi
-        return 0
-    fi
-
-    local required_kb=$((required_mb * 1024))
-    if (( available_kb < required_kb )); then
-        local available_mb=$((available_kb / 1024))
-        echo -e "${RED}Error: Low disk space (${context}).${NC}"
-        echo -e "${RED}Required free space: ${required_mb} MB, available: ${available_mb} MB.${NC}"
-        return 1
-    fi
-
-    return 0
-}
-
-abort_no_space() {
-    local context="$1"
-    echo ""
-    echo -e "${RED}=======================================================${NC}"
-    echo -e "${RED}STOPPING: No space left on device${NC}"
-    echo -e "${RED}=======================================================${NC}"
-    echo -e "${YELLOW}Context: ${context}${NC}"
-    echo "Free disk space and run the script again."
-    echo "Only validated complete files are kept; partial files are discarded."
-    exit 1
-}
-
-validate_zip_integrity() {
-    local zip_file="$1"
-
-    if command -v unzip >/dev/null 2>&1; then
-        unzip -tqq "$zip_file" >/dev/null 2>&1
-        return $?
-    fi
-
-    if command -v zip >/dev/null 2>&1; then
-        zip -T "$zip_file" >/dev/null 2>&1
-        return $?
-    fi
-
-    # If we cannot validate archive internals, keep prior behavior.
-    return 0
-}
-
-is_valid_download_file() {
-    local file_path="$1"
-    local logical_name="$2"
-    local normalized_name=""
-
-    if [[ ! -f "$file_path" ]] || [[ ! -s "$file_path" ]]; then
-        return 1
-    fi
-
-    if is_html_error "$file_path"; then
-        return 1
-    fi
-
-    normalized_name="$(printf '%s' "$logical_name" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$normalized_name" == *.zip ]]; then
-        validate_zip_integrity "$file_path" || return 1
-    fi
-
-    return 0
-}
-
-download_file_with_guards() {
-    local download_url="$1"
-    local output_path="$2"
-    local accept_header="$3"
-    local context_label="$4"
-    local logical_name="$5"
-    local tmp_path="${output_path}.part"
-
-    DOWNLOAD_LAST_CURL_EXIT=0
-    DOWNLOAD_LAST_HTTP_CODE=""
-    DOWNLOAD_LAST_TMP_FILE="$tmp_path"
-
-    rm -f "$tmp_path"
-
-    if ! ensure_min_free_space "$output_path" "$MIN_FREE_SPACE_MB" "$context_label"; then
-        DOWNLOAD_LAST_CURL_EXIT=23
-        return 23
-    fi
-
-    DOWNLOAD_LAST_HTTP_CODE="$(curl --silent --show-error -L \
-        -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0" \
-        -H "Accept: $accept_header" \
-        -H "Cookie: $COOKIE" \
-        --compressed \
-        --retry "$CURL_RETRIES" \
-        --retry-delay 2 \
-        -w "%{http_code}" \
-        "$download_url" \
-        -o "$tmp_path")"
-    DOWNLOAD_LAST_CURL_EXIT=$?
-
-    if [[ "$DOWNLOAD_LAST_CURL_EXIT" -ne 0 ]]; then
-        if [[ "$DOWNLOAD_LAST_CURL_EXIT" -ne 23 ]]; then
-            rm -f "$tmp_path"
-            DOWNLOAD_LAST_TMP_FILE=""
-        fi
-        return "$DOWNLOAD_LAST_CURL_EXIT"
-    fi
-
-    if [[ ! "$DOWNLOAD_LAST_HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
-        rm -f "$tmp_path"
-        DOWNLOAD_LAST_TMP_FILE=""
-        return 22
-    fi
-
-    if ! is_valid_download_file "$tmp_path" "$logical_name"; then
-        return 65
-    fi
-
-    if ! mv -f "$tmp_path" "$output_path"; then
-        rm -f "$tmp_path"
-        DOWNLOAD_LAST_TMP_FILE=""
-
-        if ! ensure_min_free_space "$output_path" "$MIN_FREE_SPACE_MB" "saving ${context_label}"; then
-            DOWNLOAD_LAST_CURL_EXIT=23
-            return 23
-        fi
-
-        return 1
-    fi
-
-    DOWNLOAD_LAST_TMP_FILE=""
-    return 0
-}
-
-cleanup_orphan_part_files() {
-    local removed_count=0
-
-    while IFS= read -r -d '' part_file; do
-        rm -f "$part_file"
-        removed_count=$((removed_count + 1))
-    done < <(find . -type f -name "*.part" -print0 2>/dev/null)
-
-    if [[ "$removed_count" -gt 0 ]]; then
-        echo -e "${YELLOW}! Removed ${removed_count} orphan .part file(s) from previous interrupted runs.${NC}"
-    fi
-}
-
-sanitize_filename() {
-    local original_name="$1"
-    local sanitized_name
-    sanitized_name=$(printf "%s" "$original_name" | tr '/\\:*?"<>|' '_')
-    sanitized_name=$(printf "%s" "$sanitized_name" | tr -d '\r\n')
-    sanitized_name="${sanitized_name## }"
-    sanitized_name="${sanitized_name%% }"
-
-    if [[ -z "$sanitized_name" ]]; then
-        sanitized_name="unnamed_file"
-    fi
-
-    printf "%s" "$sanitized_name"
-}
-
-FOLDER_NAMING_FORMAT="${MMF_NAMING_FORMAT:-ID_NAME}"
-MAX_FOLDER_NAME_LENGTH="${MMF_MAX_NAME_LENGTH:-80}"
-
-if [[ "$FOLDER_NAMING_FORMAT" != "NAME_ONLY" ]]; then
-    FOLDER_NAMING_FORMAT="ID_NAME"
-fi
-
-if [[ ! "$MAX_FOLDER_NAME_LENGTH" =~ ^[0-9]+$ ]]; then
-    MAX_FOLDER_NAME_LENGTH=80
-fi
-
-if [[ "$MAX_FOLDER_NAME_LENGTH" -lt 10 ]]; then
-    MAX_FOLDER_NAME_LENGTH=10
-elif [[ "$MAX_FOLDER_NAME_LENGTH" -gt 160 ]]; then
-    MAX_FOLDER_NAME_LENGTH=160
-fi
-
-sanitize_folder_name() {
-    local name="$1"
-    local cleaned=""
-
-    cleaned="$(printf "%s" "$name" | tr -d '\r\n')"
-    cleaned="$(printf "%s" "$cleaned" | sed -E 's/[<>:"/\\|?*]/_/g; s/[[:space:]]+/ /g; s/ /_/g; s/_+/_/g; s/^_+//; s/_+$//')"
-
-    if [[ -z "$cleaned" ]]; then
-        cleaned="unnamed_model"
-    fi
-
-    if [[ ${#cleaned} -gt $MAX_FOLDER_NAME_LENGTH ]]; then
-        cleaned="${cleaned:0:$MAX_FOLDER_NAME_LENGTH}"
-        cleaned="$(printf "%s" "$cleaned" | sed -E 's/_+$//')"
-    fi
-
-    if [[ -z "$cleaned" ]]; then
-        cleaned="unnamed_model"
-    fi
-
-    printf "%s" "$cleaned"
-}
-
-build_model_folder_name() {
-    local source_json="$1"
-    local model_id="$2"
-    local model_name=""
-    local clean_name=""
-
-    model_name=$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null | tr -d '\r' | xargs)
-    clean_name=$(sanitize_folder_name "$model_name")
-
-    if [[ "$FOLDER_NAMING_FORMAT" == "NAME_ONLY" ]]; then
-        printf '%s' "$clean_name"
-        return
-    fi
-
-    printf '%s_%s' "$model_id" "$clean_name"
-}
-
-unique_model_dir_name() {
-    local desired_name="$1"
-    local model_id="$2"
-    local candidate="$desired_name"
-
-    if [[ ! -e "$candidate" ]]; then
-        printf '%s' "$candidate"
-        return
-    fi
-
-    local suffix=1
-    while [[ -e "${desired_name}_${suffix}" ]]; do
-        suffix=$((suffix + 1))
-    done
-
-    printf '%s' "${desired_name}_${suffix}"
-}
-
-resolve_model_dir() {
-    local model_id="$1"
-    local json_file="$2"
-    local preferred=""
-    local legacy="model_${model_id}"
-
-    preferred=$(build_model_folder_name "$json_file" "$model_id")
-
-    if [[ -d "$preferred" ]]; then
-        printf '%s' "$preferred"
-        return
-    fi
-
-    if [[ -d "$legacy" ]]; then
-        printf '%s' "$legacy"
-        return
-    fi
-
-    preferred=$(unique_model_dir_name "$preferred" "$model_id")
-    printf '%s' "$preferred"
-}
-
-unique_output_path() {
-    local base_dir="$1"
-    local target_name="$2"
-    local candidate_path="${base_dir}/${target_name}"
-
-    if [[ ! -e "$candidate_path" ]]; then
-        printf "%s" "$candidate_path"
-        return
-    fi
-
-    local suffix=1
-    local name_without_ext="$target_name"
-    local extension=""
-
-    if [[ "$target_name" == *.* ]]; then
-        name_without_ext="${target_name%.*}"
-        extension=".${target_name##*.}"
-    fi
-
-    while true; do
-        candidate_path="${base_dir}/${name_without_ext}_${suffix}${extension}"
-        if [[ ! -e "$candidate_path" ]]; then
-            printf "%s" "$candidate_path"
-            return
-        fi
-        suffix=$((suffix + 1))
-    done
-}
-
-get_model_archive_basename() {
-    local source_json="$1"
-    local model_id="$2"
-    local model_name=""
-    local archive_base=""
-
-    model_name=$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null | tr -d '\r' | xargs)
-    archive_base=$(sanitize_filename "$model_name")
-
-    if [[ -z "$archive_base" || "$archive_base" == "null" ]]; then
-        archive_base="model_${model_id}_assets"
-    fi
-
-    printf "%s" "$archive_base"
-}
-
-is_valid_archive_file() {
-    local file_path="$1"
-    is_valid_download_file "$file_path" "$(basename "$file_path")"
-}
-
-find_existing_assets_archive() {
-    local model_dir="$1"
-    local archive_base="$2"
-    local candidate=""
-
-    if [[ ! -d "$model_dir" ]]; then
-        return 1
-    fi
-
-    candidate="${model_dir}/${archive_base}.zip"
-    if is_valid_archive_file "$candidate"; then
-        printf "%s" "$candidate"
-        return 0
-    fi
-
-    shopt -s nullglob
-    for candidate in "${model_dir}/${archive_base}"*.zip; do
-        if is_valid_archive_file "$candidate"; then
-            shopt -u nullglob
-            printf "%s" "$candidate"
-            return 0
-        fi
-    done
-    shopt -u nullglob
-
-    return 1
-}
-
-model_assets_already_archived() {
-    local model_dir="$1"
-    local source_json="$2"
-    local model_id="$3"
-    local archive_base=""
-
-    archive_base=$(get_model_archive_basename "$source_json" "$model_id")
-    find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null
-}
-
-write_compact_model_json() {
-    local source_json="$1"
-    local model_dir="$2"
-    local model_id="$3"
-    local output_json="${model_dir}/model_${model_id}.json"
-    local output_tmp="${output_json}.part"
-    local selected_categories_json="${MMF_CATEGORY_SELECTION_JSON:-[]}"
-    local selected_category_tag_names_json="${MMF_CATEGORY_SELECTION_TAG_NAMES_JSON:-[]}"
-
-    rm -f "$output_tmp"
-
-    if ! ensure_min_free_space "$output_json" "$MIN_FREE_SPACE_MB" "writing compact JSON for model $model_id"; then
-        abort_no_space "writing compact JSON for model $model_id"
-    fi
-
-    if ! printf '%s' "$selected_categories_json" | $JQ_CMD -e '. | type == "array"' >/dev/null 2>&1; then
-        selected_categories_json='[]'
-    fi
-
-    if ! printf '%s' "$selected_category_tag_names_json" | $JQ_CMD -e '. | type == "array"' >/dev/null 2>&1; then
-        selected_category_tag_names_json='[]'
-    fi
-
-    if $JQ_CMD --argjson selected_categories "$selected_categories_json" --argjson selected_category_tag_names "$selected_category_tag_names_json" '{
-        name: (.name // ""),
-        description: (.description // ""),
-        tags: (
-            (
-                if .tags == null then []
-                elif (.tags | type) == "array" then .tags
-                elif (.tags | type) == "string" then
-                    if (.tags | length) == 0 then [] else [ .tags ] end
-                else
-                    [ .tags ]
-                end
-            )
-            | map(
-                if type == "string" then .
-                elif . == null then ""
-                else tostring
-                end
-            )
-            | map(gsub("^\\s+|\\s+$"; ""))
-            | map(select(length > 0))
-            | if length > 0 then
-                .
-              else
-                (
-                    if ($selected_category_tag_names | type) == "array" then
-                        $selected_category_tag_names
-                        | map(
-                            if type == "string" then .
-                            elif . == null then ""
-                            else tostring
-                            end
-                        )
-                        | map(gsub("^\\s+|\\s+$"; ""))
-                        | map(select(length > 0))
-                        | unique
-                    else
-                        []
-                    end
-                )
-              end
-        ),
-        price: (
-            if .price == null or .price == "" then 5
-            elif (.price | type) == "number" then .price
-            elif (.price | type) == "string" then ((.price | tonumber?) // 5)
-            elif (.price | type) == "object" then (
-                if .price.value == null or .price.value == "" then 5
-                elif (.price.value | type) == "number" then .price.value
-                elif (.price.value | type) == "string" then ((.price.value | tonumber?) // 5)
-                else 5
-                end
-            )
-            else 5
-            end
-        ),
-        categories: (
-            if ($selected_categories | type) == "array" then
-                $selected_categories
-                | map(
-                    if type == "object" then
-                        {
-                            id: (.id // "" | tostring),
-                            subcategories: (
-                                if (.subcategoryIds | type) == "array" then .subcategoryIds
-                                elif (.subcategories | type) == "array" then .subcategories
-                                else []
-                                end
-                                | map(tostring)
-                                | map(select(length > 0))
-                                | unique
-                            )
-                        }
-                    else
-                        empty
-                    end
-                )
-                | map(select(.id | length > 0))
-                | map(select(.subcategories | length > 0))
-            else
-                []
-            end
-        )
-    }' "$source_json" > "$output_tmp"; then
-        if ! mv -f "$output_tmp" "$output_json"; then
-            rm -f "$output_tmp"
-            abort_no_space "saving compact JSON for model $model_id"
-        fi
-        echo -e "  ${GREEN}[OK] Wrote compact JSON: model_${model_id}.json${NC}"
-        return 0
-    fi
-
-    echo -e "  ${RED}[FAIL] Failed to build compact JSON for model $model_id${NC}"
-    rm -f "$output_tmp"
-
-    if ! printf '{"name":"","description":"","tags":[],"price":5,"categories":[]}\n' > "$output_tmp"; then
-        abort_no_space "writing fallback compact JSON for model $model_id"
-    fi
-
-    if ! mv -f "$output_tmp" "$output_json"; then
-        rm -f "$output_tmp"
-        abort_no_space "saving fallback compact JSON for model $model_id"
-    fi
-
-    return 1
-}
-
-download_model_images() {
-    local source_json="$1"
-    local model_dir="$2"
-
-    local image_data
-    image_data=$($JQ_CMD -r '.images[]? | "\((.is_primary // false) | tostring)|\(.original.url // "")"' "$source_json" 2>/dev/null)
-
-    if [[ -z "$image_data" ]]; then
-        echo -e "  ${YELLOW}! No images with original URL found${NC}"
-        return 0
-    fi
-
-    local images_dir="${model_dir}/images"
-    mkdir -p "$images_dir"
-
-    local image_index=0
-
-    while IFS='|' read -r is_primary image_url; do
-        if [[ -z "$image_url" ]]; then
-            continue
-        fi
-
-        image_index=$((image_index + 1))
-        total_downloads=$((total_downloads + 1))
-
-        image_url=$(echo "$image_url" | tr -d '\r' | xargs)
-        local url_without_query="${image_url%%\?*}"
-        local original_name
-        original_name=$(basename "$url_without_query")
-
-        if [[ -z "$original_name" ]]; then
-            original_name="image_${image_index}.bin"
-        fi
-
-        local target_name
-        if [[ "$is_primary" == "true" ]]; then
-            local extension=""
-            if [[ "$original_name" == *.* ]]; then
-                extension=".${original_name##*.}"
-            fi
-            target_name="thumbnail_image${extension}"
-        else
-            target_name="$original_name"
-        fi
-
-        target_name=$(sanitize_filename "$target_name")
-        local canonical_image_path="${images_dir}/${target_name}"
-
-        if [[ -f "$canonical_image_path" ]] && is_valid_download_file "$canonical_image_path" "$target_name"; then
-            local existing_image_size
-            existing_image_size=$(get_file_size "$canonical_image_path")
-            echo -e "  ${GREEN}[SKIP] Image already downloaded: $(basename "$canonical_image_path") (${existing_image_size} bytes)${NC}"
-            successful_downloads=$((successful_downloads + 1))
-            continue
-        fi
-
-        if [[ -e "$canonical_image_path" ]]; then
-            echo -e "  ${YELLOW}! Removing invalid existing image file: $(basename "$canonical_image_path")${NC}"
-            rm -f "$canonical_image_path"
-        fi
-
-        local output_path
-        output_path=$(unique_output_path "$images_dir" "$target_name")
-
-        echo -e "  ${YELLOW}Downloading image: $(basename "$output_path")${NC}"
-
-        if download_file_with_guards "$image_url" "$output_path" "image/*,*/*;q=0.8" "downloading image $(basename "$output_path")" "$(basename "$output_path")"; then
-            local image_size
-            image_size=$(get_file_size "$output_path")
-            echo -e "  ${GREEN}[OK] Downloaded image $(basename "$output_path") (${image_size} bytes)${NC}"
-            successful_downloads=$((successful_downloads + 1))
-        else
-            if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
-                rm -f "$output_path" "${output_path}.part"
-                abort_no_space "downloading image $(basename "$output_path")"
-            fi
-
-            if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]]; then
-                if is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
-                    echo -e "  ${RED}[FAIL] Failed image download: received HTML error page${NC}"
-                else
-                    echo -e "  ${RED}[FAIL] Failed image validation for $(basename "$output_path")${NC}"
-                fi
-                rm -f "$DOWNLOAD_LAST_TMP_FILE"
-            else
-                echo -e "  ${RED}[FAIL] Failed to download image $(basename "$output_path") (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, HTTP ${DOWNLOAD_LAST_HTTP_CODE:-unknown})${NC}"
-            fi
-
-            rm -f "$output_path"
-        fi
-
-        sleep "$IMAGE_DELAY_SEC"
-    done <<< "$image_data"
-}
-
-compress_non_json_assets() {
-    local model_dir="$1"
-    local source_json="$2"
-    local model_id="$3"
-    local archive_base=""
-    local existing_archive=""
-
-    archive_base=$(get_model_archive_basename "$source_json" "$model_id")
-    existing_archive=$(find_existing_assets_archive "$model_dir" "$archive_base" || true)
-
-    if [[ -n "$existing_archive" ]]; then
-        local existing_size
-        existing_size=$(get_file_size "$existing_archive")
-        echo -e "  ${GREEN}[SKIP] Assets archive already exists: $(basename "$existing_archive") (${existing_size} bytes)${NC}"
-        return 0
-    fi
-
-    local archive_name="${archive_base}.zip"
-    local archive_path
-    archive_path=$(unique_output_path "$model_dir" "$archive_name")
-    archive_name=$(basename "$archive_path")
-
-    local -a files_to_zip=()
-
-    while IFS= read -r file_path; do
-        files_to_zip+=("$(basename "$file_path")")
-    done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$archive_name")
-
-    if [[ ${#files_to_zip[@]} -eq 0 ]]; then
-        echo -e "  ${YELLOW}! No non-JSON files to compress${NC}"
-        return 0
-    fi
-
-    if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "creating ZIP archive for model $model_id"; then
-        abort_no_space "creating ZIP archive for model $model_id"
-    fi
-
-    rm -f "$archive_path"
-    local compression_exit=0
-
-    if command -v zip >/dev/null 2>&1; then
-        (cd "$model_dir" && zip -q "$archive_name" "${files_to_zip[@]}")
-        compression_exit=$?
-    elif command -v tar >/dev/null 2>&1; then
-        (cd "$model_dir" && tar -a -cf "$archive_name" "${files_to_zip[@]}")
-        compression_exit=$?
-    else
-        echo -e "  ${RED}[FAIL] Could not compress files: zip/tar not found${NC}"
-        return 1
-    fi
-
-    if [[ "$compression_exit" -ne 0 ]]; then
-        rm -f "$archive_path"
-        if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "creating ZIP archive for model $model_id"; then
-            abort_no_space "creating ZIP archive for model $model_id"
-        fi
-        echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
-        return 1
-    fi
-
-    if is_valid_archive_file "$archive_path"; then
-        for file_name in "${files_to_zip[@]}"; do
-            rm -f "${model_dir}/${file_name}"
-        done
-        local zip_size
-        zip_size=$(get_file_size "$archive_path")
-        echo -e "  ${GREEN}[OK] Created $(basename "$archive_path") (${zip_size} bytes)${NC}"
-        return 0
-    fi
-
-    rm -f "$archive_path"
-
-    if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "verifying ZIP archive for model $model_id"; then
-        abort_no_space "creating ZIP archive for model $model_id"
-    fi
-
-    echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
-    return 1
-}
-
-echo -e "${CYAN}========================================================${NC}"
-echo -e "${CYAN}   Bulk Downloader — STL/ZIP (Enhanced Edition)        ${NC}"
-echo -e "${CYAN}========================================================${NC}"
-echo ""
-
-# Validate cookie before doing anything else
-echo -e "${BLUE}Validating cookie configuration...${NC}"
-if ! validate_cookie; then
-    exit 1
-fi
-echo ""
-
-# Check if we're in the correct directory (should contain JSON files)
-if ! ls model_*.json 1> /dev/null 2>&1; then
-    echo -e "${RED}Error: No model JSON files found. Run the metadata downloader first (Step 1).${NC}"
-    exit 1
-fi
-
-# Check if jq is available
-JQ_CMD="jq"
-if ! command -v jq &> /dev/null; then
-    if [[ -f "${SCRIPT_DIR}/jq.exe" ]]; then
-        JQ_CMD="${SCRIPT_DIR}/jq.exe"
-    elif [[ -f "${SCRIPT_DIR}/jq" ]]; then
-        JQ_CMD="${SCRIPT_DIR}/jq"
-    elif [[ -f "../jq.exe" ]]; then
-        JQ_CMD="../jq.exe"
-    elif [[ -f "../jq" ]]; then
-        JQ_CMD="../jq"
-    elif [[ -f "./jq.exe" ]]; then
-        JQ_CMD="./jq.exe"
-    elif [[ -f "./jq" ]]; then
-        JQ_CMD="./jq"
-    else
-        echo -e "${RED}Error: jq not found. Download from https://github.com/stedolan/jq/releases${NC}"
-        echo "Place jq or jq.exe in the same directory as this script"
-        exit 1
-    fi
-fi
-
-# Create STL downloads directory
-mkdir -p stl_files
-cd stl_files || exit
-cleanup_orphan_part_files
-
-# Count JSON files
-json_count=$(find .. -name "model_*.json" -type f 2>/dev/null | wc -l)
-
-if [[ $json_count -eq 0 ]]; then
-    echo -e "${RED}Error: No JSON files found${NC}"
-    exit 1
-fi
-
-echo -e "${BLUE}Found $json_count JSON files to process${NC}"
-echo -e "${BLUE}Output folders: $FOLDER_NAMING_FORMAT (readable names; legacy model_<id> still supported)${NC}"
-echo -e "${CYAN}Minimum free space required before each write: ${MIN_FREE_SPACE_MB} MB${NC}"
-
-if ! ensure_min_free_space "." "$MIN_FREE_SPACE_MB" "before starting download loop"; then
-    abort_no_space "before starting download loop"
-fi
-
-# TEST MODE - Download just one file to verify everything works
-if [[ "$TEST_MODE" == true ]]; then
-    echo -e "${YELLOW}=======================================${NC}"
-    echo -e "${YELLOW}   RUNNING IN TEST MODE${NC}"
-    echo -e "${YELLOW}=======================================${NC}"
-    echo "Testing with first available model to verify cookie and setup..."
-    echo ""
-    
-    # Find first JSON file with download URLs
-    for json_file in ../model_*.json; do
-        model_id=$(basename "$json_file" | sed 's/model_//; s/.json//')
-        test_line=$($JQ_CMD -r '.files.items[]? | select(.download_url != null and .download_url != "") | "\(.filename // "")|\(.download_url)"' "$json_file" 2>/dev/null | head -1)
-
-        if [[ -n "$test_line" ]]; then
-            echo -e "${BLUE}Testing with model $model_id${NC}"
-            
-            # Get first file from this model
-            filename=$(echo "$test_line" | cut -d'|' -f1 | tr -d '\r' | xargs)
-            download_url=$(echo "$test_line" | cut -d'|' -f2 | tr -d '\r' | xargs)
-
-            if [[ -z "$download_url" || "$download_url" == "null" ]]; then
-                continue
-            fi
-            
-            echo -e "  Downloading: ${CYAN}$filename${NC}"
-            
-            test_file="test_download_${model_id}.tmp"
-
-            echo ""
-
-            if download_file_with_guards "$download_url" "$test_file" "application/octet-stream" "running test mode download" "$(basename "$test_file")"; then
-                file_size=$(get_file_size "$test_file")
-                echo -e "${GREEN}[OK] TEST PASSED${NC}"
-                echo -e "  Successfully downloaded ${CYAN}$filename${NC} (${file_size} bytes)"
-                echo "  File appears to be valid (not an error page)"
-                echo ""
-                echo -e "${GREEN}Cookie is working! You can now run the full download:${NC}"
-                echo "  bash $(basename "$0")"
-                rm -f "$test_file"
-                exit 0
-            fi
-
-            if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
-                rm -f "$test_file" "${test_file}.part"
-                abort_no_space "running test mode download"
-            fi
-
-            if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]] && is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
-                echo -e "${RED}[FAIL] TEST FAILED${NC}"
-                echo -e "${RED}Downloaded file is an HTML error page, not the actual file${NC}"
-                echo ""
-                show_error_content "$DOWNLOAD_LAST_TMP_FILE"
-                echo ""
-                echo -e "${YELLOW}Common causes:${NC}"
-                echo "  1. Cookie expired - get a fresh cookie from browser"
-                echo "  2. Missing cf_clearance token - copy cookie from download request, not page view"
-                echo "  3. Not logged in - make sure you're logged into MyMiniFactory in browser"
-                echo "  4. Cookie formatting error - check for extra quotes or special characters"
-                echo ""
-                echo -e "${CYAN}How to get a fresh cookie:${NC}"
-                echo "  1. Open MyMiniFactory in browser, log in"
-                echo "  2. Download any file from any model"
-                echo "  3. F12 -> Network -> Find 'download' request"
-                echo "  4. Copy the Cookie header value"
-                echo "  5. Paste into script (no extra quotes)"
-            else
-                echo -e "${RED}[FAIL] TEST FAILED${NC}"
-                echo -e "${RED}Download failed (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, HTTP ${DOWNLOAD_LAST_HTTP_CODE:-unknown})${NC}"
-                echo "Check cookie validity and your network connection."
-            fi
-
-            rm -f "$test_file" "${test_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
-            exit 1
-        else
-            is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
-            if [[ "$is_bought" == "false" ]]; then
-                echo -e "${YELLOW}! Skipping model $model_id in test mode: object is not in your library (is_bought=false).${NC}"
-            fi
-        fi
-    done
-    
-    echo -e "${RED}No downloadable files found for testing${NC}"
-    echo -e "${YELLOW}If the listed models are not owned, this is expected. Use owned models for --test.${NC}"
-    exit 1
-fi
-
-# FULL DOWNLOAD MODE
-echo -e "${BLUE}Extracting download URLs, images, and creating per-model ZIP files...${NC}"
-echo -e "${YELLOW}This will take a while - respecting rate limits${NC}"
-echo -e "${YELLOW}Press Ctrl+C to stop at any time${NC}"
-echo ""
-
-current_file=0
-total_downloads=0
-successful_downloads=0
-consecutive_failures=0
-compact_json_written=0
-zip_created=0
-models_zip_skipped=0
-not_owned_skipped=0
-models_without_file_downloads=0
-
-# Process each JSON file
-for json_file in ../model_*.json; do
-    current_file=$((current_file + 1))
-    model_id=$(basename "$json_file" | sed 's/model_//; s/.json//')
-
-    echo -e "${BLUE}[$current_file/$json_count] Processing model $model_id...${NC}"
-
-    is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
-    downloadable_file_count=$($JQ_CMD -r '[.files.items[]? | .download_url | select(. != null and . != "")] | length' "$json_file" 2>/dev/null)
-    if [[ ! "$downloadable_file_count" =~ ^[0-9]+$ ]]; then
-        downloadable_file_count=0
-    fi
-
-    # Copyright and ownership guard: if no downloadable STL/ZIP URLs exist,
-    # do not create any output for this model (no metadata, no images).
-    if [[ "$downloadable_file_count" -eq 0 ]]; then
-        if [[ "$is_bought" == "false" ]]; then
-            not_owned_skipped=$((not_owned_skipped + 1))
-            models_without_file_downloads=$((models_without_file_downloads + 1))
-            echo -e "${YELLOW}  ! Object is not in your library (is_bought=false). Skipping model output for model $model_id.${NC}"
-        else
-            models_without_file_downloads=$((models_without_file_downloads + 1))
-            echo -e "${YELLOW}  ! No downloadable STL/ZIP URLs found in metadata. Skipping model output.${NC}"
-        fi
-        echo ""
-        continue
-    fi
-
-    # Create directory for this model (readable name; falls back to legacy model_<id> if present)
-    model_dir=$(resolve_model_dir "$model_id" "$json_file")
-    mkdir -p "$model_dir"
-    if [[ "$model_dir" != "model_${model_id}" ]]; then
-        echo -e "  ${CYAN}Using folder: ${model_dir}/${NC}"
-    fi
-    model_file_successful_downloads=0
-    model_assets_complete=0
-    existing_assets_archive=""
-
-    if model_assets_already_archived "$model_dir" "$json_file" "$model_id"; then
-        existing_assets_archive=$(find_existing_assets_archive "$model_dir" "$(get_model_archive_basename "$json_file" "$model_id")")
-        existing_archive_size=$(get_file_size "$existing_assets_archive")
-        echo -e "  ${GREEN}[SKIP] Model assets already archived in $(basename "$existing_assets_archive") (${existing_archive_size} bytes) — skipping STL/ZIP re-download.${NC}"
-        model_file_successful_downloads=$downloadable_file_count
-        model_assets_complete=1
-        models_zip_skipped=$((models_zip_skipped + 1))
-        successful_downloads=$((successful_downloads + downloadable_file_count))
-    fi
-
-    # Extract downloadable files from metadata
-    download_data=$($JQ_CMD -r '.files.items[]? | "\(.filename // "")|\(.download_url // "")"' "$json_file" 2>/dev/null)
-
-    if [[ -z "$download_data" ]]; then
-        echo -e "${YELLOW}  ! No STL/ZIP file URLs found in metadata. Skipping model output.${NC}"
-        rm -rf "$model_dir"
-        models_without_file_downloads=$((models_without_file_downloads + 1))
-        echo ""
-        continue
-    elif [[ "$model_assets_complete" -eq 0 ]]; then
-        while IFS='|' read -r filename download_url; do
-            if [[ -z "$filename" ]]; then
-                continue
-            fi
-
-            filename=$(echo "$filename" | tr -d '\r' | xargs)
-            filename=$(sanitize_filename "$filename")
-            download_url=$(echo "$download_url" | tr -d '\r' | xargs)
-
-            if [[ -z "$download_url" || "$download_url" == "null" ]]; then
-                echo -e "  ${YELLOW}! Skipping $filename: no download URL (likely not owned or unavailable).${NC}"
-                continue
-            fi
-
-            canonical_output="${model_dir}/${filename}"
-
-            if [[ -f "$canonical_output" ]] && is_valid_download_file "$canonical_output" "$filename"; then
-                file_size=$(get_file_size "$canonical_output")
-                echo -e "  ${GREEN}[SKIP] Already downloaded: $(basename "$canonical_output") (${file_size} bytes)${NC}"
-                successful_downloads=$((successful_downloads + 1))
-                model_file_successful_downloads=$((model_file_successful_downloads + 1))
-                consecutive_failures=0
-                continue
-            fi
-
-            if [[ -e "$canonical_output" ]]; then
-                echo -e "  ${YELLOW}! Removing invalid existing file: $(basename "$canonical_output")${NC}"
-                rm -f "$canonical_output"
-            fi
-
-            output_file="$(unique_output_path "$model_dir" "$filename")"
-
-            total_downloads=$((total_downloads + 1))
-
-            echo -e "  ${YELLOW}Downloading file: $(basename "$output_file")${NC}"
-
-            if download_file_with_guards "$download_url" "$output_file" "application/octet-stream" "downloading file $(basename "$output_file")" "$(basename "$output_file")"; then
-                file_size=$(get_file_size "$output_file")
-                echo -e "  ${GREEN}[OK] Downloaded $(basename "$output_file") (${file_size} bytes)${NC}"
-                successful_downloads=$((successful_downloads + 1))
-                model_file_successful_downloads=$((model_file_successful_downloads + 1))
-                consecutive_failures=0
-            else
-                if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
-                    rm -f "$output_file" "${output_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
-                    abort_no_space "downloading file $(basename "$output_file")"
-                fi
-
-                if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]]; then
-                    if is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
-                        echo -e "  ${RED}[FAIL] Failed: Downloaded HTML error page instead of file${NC}"
-
-                        if [[ $consecutive_failures -eq 0 ]]; then
-                            show_error_content "$DOWNLOAD_LAST_TMP_FILE"
-                        fi
-                    else
-                        echo -e "  ${RED}[FAIL] Failed validation for $(basename "$output_file")${NC}"
-                    fi
-
-                    rm -f "$DOWNLOAD_LAST_TMP_FILE"
-                else
-                    echo -e "  ${RED}[FAIL] Failed to download $(basename "$output_file") (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, HTTP ${DOWNLOAD_LAST_HTTP_CODE:-unknown})${NC}"
-                fi
-
-                consecutive_failures=$((consecutive_failures + 1))
-                rm -f "$output_file" "${output_file}.part"
-
-                if [[ $consecutive_failures -ge $MAX_CONSECUTIVE_FAILURES ]]; then
-                    echo ""
-                    echo -e "${RED}=======================================================${NC}"
-                    echo -e "${RED}STOPPING: $MAX_CONSECUTIVE_FAILURES consecutive failures detected${NC}"
-                    echo -e "${RED}=======================================================${NC}"
-                    echo ""
-                    echo -e "${YELLOW}This indicates a systematic problem (not random failures)${NC}"
-                    echo ""
-                    echo -e "${CYAN}Most likely causes:${NC}"
-                    echo "  1. Cookie expired - get fresh cookie from browser"
-                    echo "  2. Missing cf_clearance token in cookie"
-                    echo "  3. Session logged out - log back into MyMiniFactory"
-                    echo "  4. Account permissions issue"
-                    echo ""
-                    echo -e "${CYAN}To fix:${NC}"
-                    echo "  1. Log into MyMiniFactory in your browser"
-                    echo "  2. Download a file manually to verify access"
-                    echo "  3. Copy fresh cookie from that download request (F12 -> Network)"
-                    echo "  4. Update COOKIE variable in script"
-                    echo "  5. Run in test mode first: bash $(basename "$0") --test"
-                    exit 1
-                fi
-            fi
-
-            sleep "$STL_FILE_DELAY_SEC"
-        done <<< "$download_data"
-    fi
-
-    if [[ "$model_file_successful_downloads" -eq 0 ]]; then
-        echo -e "${YELLOW}  ! No files could be downloaded for model $model_id. Removing metadata/images output for copyright compliance.${NC}"
-        rm -rf "$model_dir"
-        models_without_file_downloads=$((models_without_file_downloads + 1))
-        echo ""
-        continue
-    fi
-
-    # Build compact JSON only when at least one STL/ZIP file was downloaded.
-    if write_compact_model_json "$json_file" "$model_dir" "$model_id"; then
-        compact_json_written=$((compact_json_written + 1))
-    fi
-
-    # Download images only when the model has at least one successfully downloaded file.
-    download_model_images "$json_file" "$model_dir"
-
-    # Compress only model root files to a zip archive; images stay in model_<id>/images
-    if [[ "$model_assets_complete" -eq 1 ]]; then
-        zip_created=$((zip_created + 1))
-    elif compress_non_json_assets "$model_dir" "$json_file" "$model_id"; then
-        zip_created=$((zip_created + 1))
-    fi
-
-    echo ""
-done
-
-echo -e "${GREEN}=======================================${NC}"
-echo -e "${GREEN}   Download Complete!${NC}"
-echo -e "${GREEN}=======================================${NC}"
-echo -e "${GREEN}Successful downloads: $successful_downloads/$total_downloads files and images${NC}"
-if [[ $((total_downloads - successful_downloads)) -gt 0 ]]; then
-    echo -e "${YELLOW}Failed downloads: $((total_downloads - successful_downloads))${NC}"
-fi
-if [[ "$not_owned_skipped" -gt 0 ]]; then
-    echo -e "${YELLOW}Skipped models not owned: $not_owned_skipped${NC}"
-fi
-if [[ "$models_without_file_downloads" -gt 0 ]]; then
-    echo -e "${YELLOW}Skipped model outputs with zero downloaded files: $models_without_file_downloads${NC}"
-fi
-if [[ "$models_zip_skipped" -gt 0 ]]; then
-    echo -e "${GREEN}Models skipped (assets ZIP already present): $models_zip_skipped${NC}"
-fi
-echo -e "${GREEN}Compact JSON files written: $compact_json_written${NC}"
-echo -e "${GREEN}ZIP archives created: $zip_created${NC}"
-echo -e "${BLUE}Output structure: stl_files/<id>_<model_name>/model_<id>.json + <model_name>.zip + images/${NC}"
-echo ""
-
-echo "Sample of generated directories:"
-find . -name "model_*" -type d 2>/dev/null | head -5 | while read -r dir; do
-    file_count=$(find "$dir" -maxdepth 1 -type f | wc -l)
-    echo "  $dir: $file_count files"
-done
-</file>
-
 <file path="electron/main.js">
 const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require("electron");
 const path = require("path");
@@ -123387,7 +124261,7 @@ function sanitizeCategorySelection(rawSelection) {
         .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-const BATCH_SIZE_SELECTION_VALUES = ["25", "50", "100", "all"];
+const BATCH_SIZE_SELECTION_VALUES = ["10", "25", "50", "100", "all"];
 const BATCH_STATUS_VALUES = ["idle", "running", "completed", "failed", "interrupted"];
 
 function sanitizeNumericIdList(rawIds) {
@@ -124606,13 +125480,18 @@ function getAllowedOpenPathRoots(rawConfig) {
     const saved = loadSettingsFromDisk();
     const config = rawConfig && typeof rawConfig === "object" ? rawConfig : {};
 
+    const historyFromConfig = sanitizeDownloadRootHistory(config.downloadRootHistory);
+    const historyFromSaved = sanitizeDownloadRootHistory(saved.downloadRootHistory);
+
     const candidatePaths = [
         runtime.downloadsPath,
         runtime.stlFilesPath,
         cleanInputPath(config.downloadRoot || saved.downloadRoot),
         cleanInputPath(config.basePath || saved.basePath),
         cleanInputPath(config.jsonPath || saved.jsonPath),
-        cleanInputPath(config.foldersPath || saved.foldersPath)
+        cleanInputPath(config.foldersPath || saved.foldersPath),
+        ...historyFromConfig,
+        ...historyFromSaved
     ].filter(Boolean);
 
     return [...new Set(candidatePaths.map((entry) => path.resolve(entry)))];
@@ -124979,6 +125858,14 @@ function normalizeModelIdsText(text) {
         .map((line) => line.trim())
         .filter((line) => Boolean(line))
         .join("\n");
+}
+
+function buildModelIdsFilterText(text) {
+    if (typeof text !== "string") {
+        return "";
+    }
+
+    return sanitizeNumericIdList(text.split(/[\s,;]+/)).join("\n");
 }
 
 function normalizeCookie(cookie) {
@@ -125406,6 +126293,7 @@ function buildStepPlan(stepKey, rawConfig) {
                 ...(medusaPublishableKey ? { MMF_PUBLISHABLE_KEY: medusaPublishableKey } : {}),
                 MMF_DOWNLOAD_ROOT: downloadsPath,
                 MMF_MODEL_IDS_PATH: modelIdsPath,
+                MMF_EMIT_PROGRESS: "1",
                 PATH: processPathWithResolvedJq,
                 ...getRateLimitEnv()
             },
@@ -125462,6 +126350,7 @@ function buildStepPlan(stepKey, rawConfig) {
         if (stepKey === "step2-test") {
             args.push("--test");
         }
+        const modelIdsFilterText = buildModelIdsFilterText(modelIdsText);
 
         return {
             accepted: true,
@@ -125478,6 +126367,8 @@ function buildStepPlan(stepKey, rawConfig) {
                 MMF_CATEGORY_SELECTION_TAG_NAMES_JSON: categorySelectionTagNamesJson,
                 MMF_NAMING_FORMAT: namingFormat,
                 MMF_MAX_NAME_LENGTH: String(maxNameLength),
+                MMF_EMIT_PROGRESS: "1",
+                ...(modelIdsFilterText ? { MMF_MODEL_IDS_FILTER: modelIdsFilterText } : {}),
                 PATH: processPathWithResolvedJq,
                 ...getRateLimitEnv()
             },
