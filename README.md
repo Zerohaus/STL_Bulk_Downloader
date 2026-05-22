@@ -12,10 +12,10 @@ Steps:
 2. You may get a Windows Defender warning, ignore this. (we didn't purchase a Microsoft license)
 3. Open the application
 4. Click > Open MyMiniFactory (MMF)
-5. login to your MMF account and go to your profile page
+5. login to your MMF account and go to your profile page (leave this window open while downloading)
 6. In the app click > Capture Session
 7. Confirm the session is valid
-8. Select an Auto Load Source (Listings, Library or Creator)
+8. Select an Auto Load Source (Listings, Library or Creator Filter)
 9. Listings is for creators that want to download their files
 10. Library is for models you have purchased/ own in your Library
 11. Creator filter is for filtering your library to a specific creator
