@@ -87,6 +87,7 @@ const DEFAULT_SETTINGS = {
     maxNameLength: 80,
     catalogLoadMode: "library",
     catalogCreatorIdFilter: "",
+    manualRetryIdsText: "",
     categorySelection: []
 };
 
@@ -158,6 +159,9 @@ function sanitizeSettings(raw) {
         maxNameLength,
         catalogLoadMode: normalizeCatalogLoadMode(source.catalogLoadMode),
         catalogCreatorIdFilter: normalizeCreatorIdFilter(source.catalogCreatorIdFilter),
+        manualRetryIdsText: typeof source.manualRetryIdsText === "string"
+            ? source.manualRetryIdsText
+            : DEFAULT_SETTINGS.manualRetryIdsText,
         categorySelection: sanitizeCategorySelection(source.categorySelection)
     };
 }

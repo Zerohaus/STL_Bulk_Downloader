@@ -427,6 +427,27 @@ select:focus {
     background: rgba(255, 255, 255, 0.58);
 }
 
+.manual-retry-ids-group {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.58);
+}
+
+.manual-retry-ids-group textarea {
+    width: 100%;
+    min-height: 5.5rem;
+    resize: vertical;
+    font-family: var(--mono, ui-monospace, monospace);
+    font-size: 0.92rem;
+}
+
+.manual-retry-ids-actions {
+    margin-top: 8px;
+    margin-bottom: 0;
+}
+
 .model-tools-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);

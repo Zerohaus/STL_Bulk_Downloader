@@ -2,6 +2,9 @@
 
 ## [1.4.1] — 2026-05-22
 
+### Added
+- **Manual retry IDs** in the desktop UI (below Auto load source): paste failed model IDs, click **Load manual IDs** (enabled only when at least one valid ID is present). Replaces the visible list for a targeted batch run, unmarks those IDs from batch completed progress, and keeps cached catalog names from prior auto-loads. Step 2 still skips files already on disk in the same download folder.
+
 ### Fixed
 - Step 2 no longer uses `xargs` for trimming parsed model/file/image fields; apostrophes in model names and URLs no longer trigger `xargs: unmatched single quote` errors.
 - Image URL parsing now preserves quoted/special characters correctly, preventing `curl: (3) URL rejected: Malformed input to a URL function` failures on valid MMF image links.

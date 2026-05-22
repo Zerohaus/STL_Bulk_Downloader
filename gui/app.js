@@ -27,6 +27,8 @@ const elements = {
     sessionStatus: document.getElementById("sessionStatus"),
     creatorFilterGroup: document.getElementById("creatorFilterGroup"),
     creatorIdFilterInput: document.getElementById("creatorIdFilterInput"),
+    manualRetryIdsInput: document.getElementById("manualRetryIdsInput"),
+    loadManualIdsBtn: document.getElementById("loadManualIdsBtn"),
     categorySelectionList: document.getElementById("categorySelectionList"),
     categorySelectionSummary: document.getElementById("categorySelectionSummary"),
     categorySelectionPreview: document.getElementById("categorySelectionPreview"),
@@ -124,6 +126,8 @@ let settingsApplyInProgress = false;
 let pipelineRunning = false;
 let runtimeInfoCache = null;
 let modelIdEntries = [];
+/** Names/metadata from past auto-loads; kept when the visible list is replaced for manual retry. */
+let modelIdCatalogCache = [];
 let categoryTaxonomyItems = [];
 let categorySelectionMap = new Map();
 const MODEL_LIST_UI_PAGE_SIZE = 20;
@@ -789,6 +793,45 @@ function parseModelIdTokens(inputText) {
         .filter((token) => token.length > 0);
 }
 
+function parseManualRetryIdsInput(inputText) {
+    const tokens = parseModelIdTokens(inputText);
+    const validIds = [];
+    const invalidTokens = [];
+    const seen = new Set();
+
+    tokens.forEach((token) => {
+        if (!/^\d+$/.test(token)) {
+            invalidTokens.push(token);
+            return;
+        }
+
+        if (seen.has(token)) {
+            return;
+        }
+
+        seen.add(token);
+        validIds.push(token);
+    });
+
+    return { validIds, invalidTokens };
+}
+
+function updateLoadManualIdsButtonState() {
+    const button = elements.loadManualIdsBtn;
+    if (!button) {
+        return;
+    }
+
+    const { validIds } = parseManualRetryIdsInput(
+        elements.manualRetryIdsInput ? elements.manualRetryIdsInput.value : ""
+    );
+    const hasValidIds = validIds.length > 0;
+    button.disabled = !hasValidIds || isModelListMutationLocked();
+    button.title = hasValidIds
+        ? "Replace the model list with these IDs for a targeted retry"
+        : "Enter at least one numeric model ID";
+}
+
 function getOrderedValidModelIds() {
     const sourceText = elements.idsInput ? elements.idsInput.value : "";
     return parseModelIds(sourceText).validIds;
@@ -1451,8 +1494,22 @@ function syncIdsTextareaFromEntries() {
     elements.idsInput.value = modelIdEntries.map((entry) => entry.id).join("\n");
 }
 
+function rememberModelIdCatalogEntries(entries) {
+    modelIdCatalogCache = mergeModelEntries(
+        modelIdCatalogCache,
+        Array.isArray(entries) ? entries : []
+    );
+}
+
+function getModelIdCatalogForLookup() {
+    const currentEntries = modelIdEntries
+        .map((entry) => normalizeModelEntry(entry))
+        .filter(Boolean);
+    return mergeModelEntries(modelIdCatalogCache, currentEntries);
+}
+
 function getModelIdCatalogSnapshot() {
-    return modelIdEntries
+    return getModelIdCatalogForLookup()
         .filter((entry) => entry && /^\d+$/.test(entry.id))
         .map((entry) => ({
             id: entry.id,
@@ -1689,6 +1746,7 @@ function setModelIdEntriesFromCatalog(items) {
         .filter(Boolean);
 
     modelIdEntries = mergeModelEntries([], normalizedItems);
+    rememberModelIdCatalogEntries(normalizedItems);
     modelListUiPage = 1;
     syncIdsTextareaFromEntries();
     reconcileBatchProgressWithCurrentIds();
@@ -2162,6 +2220,9 @@ function getSettingsSnapshot() {
         maxNameLength: elements.maxLengthInput.value,
         catalogLoadMode: getCatalogLoadMode(),
         catalogCreatorIdFilter: getCreatorIdFilter(),
+        manualRetryIdsText: elements.manualRetryIdsInput
+            ? elements.manualRetryIdsInput.value
+            : "",
         categorySelection: getCategorySelectionSnapshot()
     };
 }
@@ -2192,6 +2253,9 @@ function applySettingsToForm(settings) {
         ? settings.modelIdsText
         : elements.idsInput.value;
     const catalog = Array.isArray(settings.modelIdCatalog) ? settings.modelIdCatalog : [];
+    modelIdCatalogCache = catalog
+        .map((entry) => normalizeModelEntry(entry))
+        .filter(Boolean);
     setModelIdEntriesFromText(modelIdsText, catalog);
 
     const historyFromSettings = sanitizeDownloadRootHistory(settings.downloadRootHistory);
@@ -2235,6 +2299,12 @@ function applySettingsToForm(settings) {
         setCreatorIdFilter(settings.catalogCreatorIdFilter);
     } else if (typeof settings.creatorIdFilter === "string") {
         setCreatorIdFilter(settings.creatorIdFilter);
+    }
+
+    if (elements.manualRetryIdsInput) {
+        elements.manualRetryIdsInput.value = typeof settings.manualRetryIdsText === "string"
+            ? settings.manualRetryIdsText
+            : "";
     }
 
     setCategorySelectionMapFromArray(Array.isArray(settings.categorySelection) ? settings.categorySelection : []);
@@ -2364,6 +2434,7 @@ function setRunButtonsState() {
 
     unlockModelSearchControls();
     renderModelIdList();
+    updateLoadManualIdsButtonState();
 
     elements.stopRunBtn.disabled = !running;
 }
@@ -2649,6 +2720,53 @@ async function autoLoadOwnModelIds(options = {}) {
             button.textContent = previousLabel || "Auto load my IDs";
         }
     }
+}
+
+async function loadManualRetryIds() {
+    const inputText = elements.manualRetryIdsInput ? elements.manualRetryIdsInput.value : "";
+    const { validIds, invalidTokens } = parseManualRetryIdsInput(inputText);
+
+    if (validIds.length === 0) {
+        setStatus("Enter at least one numeric model ID.", "bad");
+        return;
+    }
+
+    if (isModelListMutationLocked()) {
+        setStatus("Cannot change model list while a pipeline is running.", "warn");
+        return;
+    }
+
+    if (modelIdEntries.length > 0) {
+        const confirmed = await showConfirmDialog(
+            `Replace the current list (${modelIdEntries.length.toLocaleString()} model(s)) with ${validIds.length.toLocaleString()} manual ID(s)?`
+        );
+        if (!confirmed) {
+            setStatus("Manual ID load canceled.", "warn");
+            return;
+        }
+    }
+
+    const retrySet = new Set(validIds);
+    const removedFromCompleted = sanitizeNumericIdList(batchProgressState.completedIds)
+        .filter((id) => retrySet.has(id)).length;
+    batchProgressState.completedIds = sanitizeNumericIdList(batchProgressState.completedIds)
+        .filter((id) => !retrySet.has(id));
+
+    setModelIdEntriesFromText(validIds.join("\n"), getModelIdCatalogForLookup());
+    refreshDashboard();
+    scheduleSettingsSave();
+
+    const invalidSuffix = invalidTokens.length > 0
+        ? ` Ignored ${invalidTokens.length} non-numeric token(s).`
+        : "";
+    const completedSuffix = removedFromCompleted > 0
+        ? ` ${removedFromCompleted} ID(s) unmarked from batch completed so they can run again.`
+        : "";
+
+    setStatus(
+        `Loaded ${validIds.length.toLocaleString()} manual ID(s) for retry.${completedSuffix}${invalidSuffix}`,
+        invalidTokens.length > 0 ? "warn" : "ok"
+    );
 }
 
 function buildCommandPlan() {
@@ -3705,6 +3823,17 @@ function handleWorkflowState(payload) {
 
 if (elements.autoLoadMyIdsBtn) {
     elements.autoLoadMyIdsBtn.addEventListener("click", autoLoadOwnModelIds);
+}
+
+if (elements.manualRetryIdsInput) {
+    elements.manualRetryIdsInput.addEventListener("input", () => {
+        updateLoadManualIdsButtonState();
+        scheduleSettingsSave();
+    });
+}
+
+if (elements.loadManualIdsBtn) {
+    elements.loadManualIdsBtn.addEventListener("click", loadManualRetryIds);
 }
 
 if (elements.batchSizeSelect) {

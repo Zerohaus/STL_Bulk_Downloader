@@ -143,6 +143,15 @@
                     <p class="hint">Used only in Creator filter mode. It matches entries by creatorId.</p>
                 </div>
 
+                <div class="manual-retry-ids-group">
+                    <label for="manualRetryIdsInput">Manual retry IDs</label>
+                    <textarea id="manualRetryIdsInput" rows="4" placeholder="153318&#10;228967" spellcheck="false"></textarea>
+                    <p class="hint">Paste numeric model IDs that failed (one per line, or separated by commas). Use the same download folder — Step 2 skips files already on disk.</p>
+                    <div class="button-row manual-retry-ids-actions">
+                        <button id="loadManualIdsBtn" type="button" class="btn btn-secondary" disabled>Load manual IDs</button>
+                    </div>
+                </div>
+
                 <div class="model-tools-grid">
                     <div>
                         <label for="modelSearchInput">Search loaded models and creators</label>
