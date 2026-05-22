@@ -2,9 +2,9 @@
 Built using deliriyum's MyMiniFactory Model Downloader
 https://gist.github.com/deliriyum/d353b9528e970e242b1915bb51da2a61
 
-This app Downloads files you own from MyMiniFactory
-This is not a scraper, it uses API calls
-This does not download files that you do not own
+This app Downloads files you own from MyMiniFactory.
+This is not a scraper, it uses API calls.
+This does not download files that you do not own.
 
 # WINDOWS
 Steps:
