@@ -71,6 +71,10 @@ MODEL_IDS_FILTER_RAW="${MMF_MODEL_IDS_FILTER:-}"
 DOWNLOAD_LAST_CURL_EXIT=0
 DOWNLOAD_LAST_HTTP_CODE=""
 DOWNLOAD_LAST_TMP_FILE=""
+DOWNLOAD_LAST_ORIGINAL_URL=""
+DOWNLOAD_LAST_SANITIZED_URL=""
+DOWNLOAD_LAST_URL_SANITIZATION_NOTE=""
+DOWNLOAD_LAST_URL_SANITIZATION_CHANGED=0
 DISK_CHECK_WARNED=0
 MODEL_IDS_FILTER_PADDED=""
 MODEL_IDS_FILTER_ACTIVE=0
@@ -86,6 +90,112 @@ emit_progress_event() {
     printf 'MMF_PROGRESS %s\n' "$1"
 }
 
+trim_field() {
+    local value="$1"
+
+    value="${value//$'\r'/}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+
+    printf "%s" "$value"
+}
+
+sanitize_url() {
+    local raw_url="$1"
+    local sanitized_url=""
+    local transformed_url=""
+    local -a note_parts=()
+
+    DOWNLOAD_LAST_URL_SANITIZATION_NOTE=""
+    DOWNLOAD_LAST_URL_SANITIZATION_CHANGED=0
+
+    sanitized_url="$(trim_field "$raw_url")"
+    if [[ "$sanitized_url" != "$raw_url" ]]; then
+        note_parts+=("trimmed leading/trailing whitespace or CR/LF")
+    fi
+
+    transformed_url="$(printf "%s" "$sanitized_url" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
+    if [[ "$transformed_url" != "$sanitized_url" ]]; then
+        note_parts+=("removed invisible control characters")
+        sanitized_url="$transformed_url"
+    fi
+
+    if [[ -n "$sanitized_url" && "$sanitized_url" != "null" ]]; then
+        transformed_url="$sanitized_url"
+        transformed_url="${transformed_url// /%20}"
+        transformed_url="${transformed_url//\'/%27}"
+        transformed_url="${transformed_url//\"/%22}"
+        transformed_url="${transformed_url//</%3C}"
+        transformed_url="${transformed_url//>/%3E}"
+        transformed_url="${transformed_url//\\/%5C}"
+        transformed_url="${transformed_url//\`/%60}"
+        transformed_url="${transformed_url//\{/%7B}"
+        transformed_url="${transformed_url//\}/%7D}"
+        transformed_url="${transformed_url//|/%7C}"
+        transformed_url="${transformed_url//\^/%5E}"
+        transformed_url="${transformed_url//\[/%5B}"
+        transformed_url="${transformed_url//\]/%5D}"
+        transformed_url="${transformed_url//\(/%28}"
+        transformed_url="${transformed_url//\)/%29}"
+
+        if [[ "$transformed_url" != "$sanitized_url" ]]; then
+            note_parts+=("encoded unsafe URL characters")
+            sanitized_url="$transformed_url"
+        fi
+    fi
+
+    if [[ -z "$sanitized_url" || "$sanitized_url" == "null" ]]; then
+        note_parts+=("empty URL after sanitization")
+    fi
+
+    if [[ "$sanitized_url" =~ [[:space:]] ]]; then
+        note_parts+=("contains whitespace after sanitization")
+    fi
+
+    if [[ ! "$sanitized_url" =~ ^https?://[^/?#[:space:]]+ ]]; then
+        note_parts+=("URL must start with http(s):// and include a host")
+    fi
+
+    if [[ ${#note_parts[@]} -gt 0 ]]; then
+        local joined_notes="${note_parts[0]}"
+        local note_index=1
+        while [[ "$note_index" -lt "${#note_parts[@]}" ]]; do
+            joined_notes="${joined_notes}; ${note_parts[$note_index]}"
+            note_index=$((note_index + 1))
+        done
+        DOWNLOAD_LAST_URL_SANITIZATION_NOTE="$joined_notes"
+    fi
+
+    if [[ "$sanitized_url" != "$raw_url" ]]; then
+        DOWNLOAD_LAST_URL_SANITIZATION_CHANGED=1
+    fi
+
+    if [[ -z "$sanitized_url" || "$sanitized_url" == "null" ]]; then
+        return 1
+    fi
+
+    if [[ ! "$sanitized_url" =~ ^https?://[^/?#[:space:]]+ ]]; then
+        return 1
+    fi
+
+    if [[ "$sanitized_url" =~ [[:space:]] ]]; then
+        return 1
+    fi
+
+    printf "%s" "$sanitized_url"
+}
+
+print_url_debug() {
+    local context_label="$1"
+
+    echo -e "  ${CYAN}[URL-DEBUG] ${context_label}${NC}"
+    echo "    Original URL: ${DOWNLOAD_LAST_ORIGINAL_URL:-<empty>}"
+    echo "    Sanitized URL: ${DOWNLOAD_LAST_SANITIZED_URL:-<empty>}"
+    if [[ -n "$DOWNLOAD_LAST_URL_SANITIZATION_NOTE" ]]; then
+        echo "    URL adjustments: $DOWNLOAD_LAST_URL_SANITIZATION_NOTE"
+    fi
+}
+
 load_model_ids_filter() {
     local token
     local normalized_filter
@@ -97,7 +207,7 @@ load_model_ids_filter() {
     normalized_filter="${normalized_filter//;/ }"
 
     for token in $normalized_filter; do
-        token="$(printf "%s" "$token" | tr -d '\r' | xargs)"
+        token="$(trim_field "$token")"
         if [[ "$token" =~ ^[0-9]+$ ]] && [[ "$MODEL_IDS_FILTER_PADDED" != *" $token "* ]]; then
             MODEL_IDS_FILTER_PADDED="${MODEL_IDS_FILTER_PADDED} ${token}"
         fi
@@ -314,10 +424,30 @@ download_file_with_guards() {
     local context_label="$4"
     local logical_name="$5"
     local tmp_path="${output_path}.part"
+    local sanitized_download_url=""
 
     DOWNLOAD_LAST_CURL_EXIT=0
     DOWNLOAD_LAST_HTTP_CODE=""
     DOWNLOAD_LAST_TMP_FILE="$tmp_path"
+    DOWNLOAD_LAST_ORIGINAL_URL="$download_url"
+    DOWNLOAD_LAST_SANITIZED_URL=""
+    DOWNLOAD_LAST_URL_SANITIZATION_NOTE=""
+    DOWNLOAD_LAST_URL_SANITIZATION_CHANGED=0
+
+    if ! sanitized_download_url="$(sanitize_url "$download_url")"; then
+        DOWNLOAD_LAST_CURL_EXIT=3
+        DOWNLOAD_LAST_HTTP_CODE="000"
+        DOWNLOAD_LAST_TMP_FILE=""
+        rm -f "$tmp_path"
+        echo -e "  ${RED}[URL-ERROR] Invalid URL for ${context_label}${NC}"
+        print_url_debug "Rejected before curl"
+        return 3
+    fi
+
+    DOWNLOAD_LAST_SANITIZED_URL="$sanitized_download_url"
+    if [[ "$DOWNLOAD_LAST_URL_SANITIZATION_CHANGED" -eq 1 ]]; then
+        print_url_debug "Sanitized before curl"
+    fi
 
     rm -f "$tmp_path"
 
@@ -334,11 +464,14 @@ download_file_with_guards() {
         --retry "$CURL_RETRIES" \
         --retry-delay 2 \
         -w "%{http_code}" \
-        "$download_url" \
+        "$sanitized_download_url" \
         -o "$tmp_path")"
     DOWNLOAD_LAST_CURL_EXIT=$?
 
     if [[ "$DOWNLOAD_LAST_CURL_EXIT" -ne 0 ]]; then
+        if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 3 ]]; then
+            print_url_debug "curl exit 3 while ${context_label}"
+        fi
         if [[ "$DOWNLOAD_LAST_CURL_EXIT" -ne 23 ]]; then
             rm -f "$tmp_path"
             DOWNLOAD_LAST_TMP_FILE=""
@@ -388,10 +521,40 @@ cleanup_orphan_part_files() {
 sanitize_filename() {
     local original_name="$1"
     local sanitized_name
-    sanitized_name=$(printf "%s" "$original_name" | tr '/\\:*?"<>|' '_')
-    sanitized_name=$(printf "%s" "$sanitized_name" | tr -d '\r\n')
-    sanitized_name="${sanitized_name## }"
-    sanitized_name="${sanitized_name%% }"
+    local base_name
+    local extension=""
+
+    sanitized_name=$(printf "%s" "$original_name" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')
+    sanitized_name="$(trim_field "$sanitized_name")"
+    sanitized_name=$(printf "%s" "$sanitized_name" | sed -E "s/[<>:\"/\\|?*]/_/g; s/'//g; s/[[:space:]]+/ /g")
+    sanitized_name="${sanitized_name// /_}"
+    sanitized_name=$(printf "%s" "$sanitized_name" | sed -E 's/_+/_/g')
+
+    if [[ "$sanitized_name" == *.* ]] && [[ "$sanitized_name" != .* ]]; then
+        base_name="${sanitized_name%.*}"
+        extension=".${sanitized_name##*.}"
+    else
+        base_name="$sanitized_name"
+    fi
+
+    base_name=$(printf "%s" "$base_name" | sed -E 's/[. ]+$//; s/^[_.]+//; s/[_.]+$//; s/_+/_/g')
+    extension=$(printf "%s" "$extension" | sed -E 's/[. ]+$//')
+
+    if [[ -z "$base_name" ]]; then
+        if [[ -n "$extension" ]]; then
+            sanitized_name="unnamed_file${extension}"
+        else
+            sanitized_name="unnamed_file"
+        fi
+    else
+        sanitized_name="${base_name}${extension}"
+    fi
+
+    sanitized_name=$(printf "%s" "$sanitized_name" | sed -E 's/[. ]+$//')
+
+    if [[ "$sanitized_name" =~ ^_+$ ]]; then
+        sanitized_name="unnamed_file"
+    fi
 
     if [[ -z "$sanitized_name" ]]; then
         sanitized_name="unnamed_file"
@@ -421,8 +584,11 @@ sanitize_folder_name() {
     local name="$1"
     local cleaned=""
 
-    cleaned="$(printf "%s" "$name" | tr -d '\r\n')"
-    cleaned="$(printf "%s" "$cleaned" | sed -E 's/[<>:"/\\|?*]/_/g; s/[[:space:]]+/ /g; s/ /_/g; s/_+/_/g; s/^_+//; s/_+$//')"
+    cleaned="$(printf "%s" "$name" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
+    cleaned="$(trim_field "$cleaned")"
+    cleaned="$(printf "%s" "$cleaned" | sed -E "s/[<>:\"/\\|?*]/_/g; s/'//g; s/[[:space:]]+/ /g")"
+    cleaned="${cleaned// /_}"
+    cleaned="$(printf "%s" "$cleaned" | sed -E 's/_+/_/g; s/[. ]+$//; s/^[_.]+//; s/[_.]+$//')"
 
     if [[ -z "$cleaned" ]]; then
         cleaned="unnamed_model"
@@ -437,6 +603,10 @@ sanitize_folder_name() {
         cleaned="unnamed_model"
     fi
 
+    if [[ "$cleaned" =~ ^_+$ ]]; then
+        cleaned="unnamed_model"
+    fi
+
     printf "%s" "$cleaned"
 }
 
@@ -446,7 +616,7 @@ build_model_folder_name() {
     local model_name=""
     local clean_name=""
 
-    model_name=$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null | tr -d '\r' | xargs)
+    model_name="$(trim_field "$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null)")"
     clean_name=$(sanitize_folder_name "$model_name")
 
     if [[ "$FOLDER_NAMING_FORMAT" == "NAME_ONLY" ]]; then
@@ -532,7 +702,7 @@ get_model_archive_basename() {
     local model_name=""
     local archive_base=""
 
-    model_name=$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null | tr -d '\r' | xargs)
+    model_name="$(trim_field "$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null)")"
     archive_base=$(sanitize_filename "$model_name")
 
     if [[ -z "$archive_base" || "$archive_base" == "null" ]]; then
@@ -772,7 +942,7 @@ download_model_images() {
         image_index=$((image_index + 1))
         total_downloads=$((total_downloads + 1))
 
-        image_url=$(echo "$image_url" | tr -d '\r' | xargs)
+        image_url="$(trim_field "$image_url")"
         local url_without_query="${image_url%%\?*}"
         local original_name
         original_name=$(basename "$url_without_query")
@@ -870,9 +1040,9 @@ compress_non_json_assets() {
 
     local -a files_to_zip=()
 
-    while IFS= read -r file_path; do
+    while IFS= read -r -d '' file_path; do
         files_to_zip+=("$(basename "$file_path")")
-    done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$archive_name")
+    done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$archive_name" -print0)
 
     if [[ ${#files_to_zip[@]} -eq 0 ]]; then
         echo -e "  ${YELLOW}! No non-JSON files to compress${NC}"
@@ -898,6 +1068,13 @@ compress_non_json_assets() {
     fi
 
     if [[ "$compression_exit" -ne 0 ]]; then
+        echo -e "  ${RED}[ZIP-DEBUG] Archive path: $archive_path${NC}"
+        echo -e "  ${RED}[ZIP-DEBUG] zip exit code: $compression_exit${NC}"
+        echo -e "  ${RED}[ZIP-DEBUG] Files considered for archive: ${#files_to_zip[@]}${NC}"
+        for file_name in "${files_to_zip[@]}"; do
+            echo "    $file_name"
+        done
+
         rm -f "$archive_path"
         if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "creating ZIP archive for model $model_id"; then
             abort_no_space "creating ZIP archive for model $model_id"
@@ -917,6 +1094,14 @@ compress_non_json_assets() {
     fi
 
     rm -f "$archive_path"
+
+    echo -e "  ${RED}[ZIP-DEBUG] Archive path: $archive_path${NC}"
+    echo -e "  ${RED}[ZIP-DEBUG] zip exit code: $compression_exit${NC}"
+    echo -e "  ${RED}[ZIP-DEBUG] Archive failed integrity validation after creation${NC}"
+    echo -e "  ${RED}[ZIP-DEBUG] Files considered for archive: ${#files_to_zip[@]}${NC}"
+    for file_name in "${files_to_zip[@]}"; do
+        echo "    $file_name"
+    done
 
     if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "verifying ZIP archive for model $model_id"; then
         abort_no_space "creating ZIP archive for model $model_id"
@@ -1024,8 +1209,8 @@ if [[ "$TEST_MODE" == true ]]; then
             echo -e "${BLUE}Testing with model $model_id${NC}"
             
             # Get first file from this model
-            filename=$(echo "$test_line" | cut -d'|' -f1 | tr -d '\r' | xargs)
-            download_url=$(echo "$test_line" | cut -d'|' -f2 | tr -d '\r' | xargs)
+            filename="$(trim_field "$(echo "$test_line" | cut -d'|' -f1)")"
+            download_url="$(trim_field "$(echo "$test_line" | cut -d'|' -f2)")"
 
             if [[ -z "$download_url" || "$download_url" == "null" ]]; then
                 continue
@@ -1196,9 +1381,9 @@ for json_file in "${model_json_files[@]}"; do
                 continue
             fi
 
-            filename=$(echo "$filename" | tr -d '\r' | xargs)
+            filename="$(trim_field "$filename")"
             filename=$(sanitize_filename "$filename")
-            download_url=$(echo "$download_url" | tr -d '\r' | xargs)
+            download_url="$(trim_field "$download_url")"
 
             if [[ -z "$download_url" || "$download_url" == "null" ]]; then
                 echo -e "  ${YELLOW}! Skipping $filename: no download URL (likely not owned or unavailable).${NC}"

@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.1] — 2026-05-22
+
+### Fixed
+- Step 2 no longer uses `xargs` for trimming parsed model/file/image fields; apostrophes in model names and URLs no longer trigger `xargs: unmatched single quote` errors.
+- Image URL parsing now preserves quoted/special characters correctly, preventing `curl: (3) URL rejected: Malformed input to a URL function` failures on valid MMF image links.
+- Archive base-name parsing now safely handles quoted model names, avoiding false ZIP creation failures tied to broken trim parsing.
+- Added URL hardening before every curl request in Step 2: trim CR/LF, remove control characters, encode unsafe URL characters, preserve query params, and reject invalid/empty URLs early.
+- Added URL diagnostics for malformed-link failures: logs original URL, sanitized URL, and the exact sanitization adjustments when a URL is changed or curl exits with code 3.
+- Hardened `sanitize_filename` and `sanitize_folder_name` to normalize unsafe/special characters, remove control chars, collapse whitespace, and avoid trailing dot/space or underscore-only names.
+- ZIP input collection now uses null-delimited reads for safer filename handling, and ZIP failures now log archive path, zip exit code, and the file list used during archive creation.
+
 ## [1.4.0] — 2026-05-21
 
 ### Added
