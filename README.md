@@ -31,4 +31,4 @@ Steps:
 
 
 # MAC
-Coming soon
+Also Available
