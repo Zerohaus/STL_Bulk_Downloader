@@ -13,6 +13,8 @@
 - Added URL diagnostics for malformed-link failures: logs original URL, sanitized URL, and the exact sanitization adjustments when a URL is changed or curl exits with code 3.
 - Hardened `sanitize_filename` and `sanitize_folder_name` to normalize unsafe/special characters, remove control chars, collapse whitespace, and avoid trailing dot/space or underscore-only names.
 - ZIP input collection now uses null-delimited reads for safer filename handling, and ZIP failures now log archive path, zip exit code, and the file list used during archive creation.
+- Step 2 ZIP packaging hardening: skip outer wrap when MMF already delivered valid standalone ZIP(s) (e.g. Supports + Unsupported packs); require free disk space based on payload size; compress via `zip -@` and batched `zip -g` fallback; store-only mode (`-0`) for large STL sets; capture zip stderr in logs; fall back to `tar` when `zip` fails.
+- Step 2 disk planning from MMF metadata `files.items[].size` (bytes or string): per-model and per-file free-space checks with `[DISK]` logs; unknown sizes estimated from known file averages (Kraken-style metadata); `[ZIP-WARN]` when payload exceeds 4 GiB; automatic Zip64 (`zip -fz`) for payloads over ~3.3 GiB when supported (no extra dependency).
 
 ## [1.4.0] — 2026-05-21
 

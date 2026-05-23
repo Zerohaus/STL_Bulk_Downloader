@@ -65,6 +65,10 @@ MAX_CONSECUTIVE_FAILURES=3  # Stop if this many downloads fail in a row
 STL_FILE_DELAY_SEC="${MMF_STL_FILE_DELAY_SEC:-5}"
 IMAGE_DELAY_SEC="${MMF_IMAGE_DELAY_SEC:-3}"
 MIN_FREE_SPACE_MB="${MMF_MIN_FREE_SPACE_MB:-2048}"
+DISK_MARGIN_MB_PER_FILE="${MMF_DISK_MARGIN_MB_PER_FILE:-512}"
+DISK_MARGIN_MB_MODEL="${MMF_DISK_MARGIN_MB_MODEL:-1024}"
+ZIP32_LIMIT_BYTES=4294967295
+ZIP64_RETRY_BYTES=3500000000
 CURL_RETRIES="${MMF_CURL_RETRIES:-2}"
 MODEL_IDS_FILTER_RAW="${MMF_MODEL_IDS_FILTER:-}"
 
@@ -255,6 +259,14 @@ if [[ ! "$MIN_FREE_SPACE_MB" =~ ^[0-9]+$ ]]; then
     MIN_FREE_SPACE_MB=2048
 fi
 
+if [[ ! "$DISK_MARGIN_MB_PER_FILE" =~ ^[0-9]+$ ]]; then
+    DISK_MARGIN_MB_PER_FILE=512
+fi
+
+if [[ ! "$DISK_MARGIN_MB_MODEL" =~ ^[0-9]+$ ]]; then
+    DISK_MARGIN_MB_MODEL=1024
+fi
+
 if [[ ! "$CURL_RETRIES" =~ ^[0-9]+$ ]]; then
     CURL_RETRIES=2
 fi
@@ -367,9 +379,191 @@ ensure_min_free_space() {
     return 0
 }
 
+format_bytes_human() {
+    local bytes="$1"
+
+    if [[ ! "$bytes" =~ ^[0-9]+$ ]]; then
+        printf "unknown"
+        return
+    fi
+
+    if (( bytes >= 1073741824 )); then
+        printf "%d.%02d GiB" $((bytes / 1073741824)) $(((bytes % 1073741824) * 100 / 1073741824))
+        return
+    fi
+
+    if (( bytes >= 1048576 )); then
+        printf "%d.%02d MiB" $((bytes / 1048576)) $(((bytes % 1048576) * 100 / 1048576))
+        return
+    fi
+
+    if (( bytes >= 1024 )); then
+        printf "%d KiB" $((bytes / 1024))
+        return
+    fi
+
+    printf "%d B" "$bytes"
+}
+
+log_disk_context() {
+    local probe_path="$1"
+    local context_label="$2"
+    local required_mb="${3:-}"
+    local available_kb=""
+
+    available_kb="$(get_available_kb "$probe_path")"
+    if [[ "$available_kb" =~ ^[0-9]+$ ]]; then
+        echo -e "  ${CYAN}[DISK] ${context_label} — free: $(format_bytes_human $((available_kb * 1024)))${NC}"
+    else
+        echo -e "  ${CYAN}[DISK] ${context_label} — free: unknown on this system${NC}"
+    fi
+
+    if [[ "$required_mb" =~ ^[0-9]+$ ]] && [[ "$required_mb" -gt 0 ]]; then
+        echo -e "  ${CYAN}[DISK] ${context_label} — need at least: ${required_mb} MB ($(format_bytes_human $((required_mb * 1024 * 1024))))${NC}"
+    fi
+}
+
+metadata_size_to_bytes() {
+    local raw_size="$1"
+
+    if [[ -z "$raw_size" || "$raw_size" == "null" ]]; then
+        printf "0"
+        return
+    fi
+
+    if [[ "$raw_size" =~ ^[0-9]+$ ]]; then
+        printf "%s" "$raw_size"
+        return
+    fi
+
+    if [[ "$raw_size" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        printf "%.0f" "$raw_size" 2>/dev/null || printf "0"
+        return
+    fi
+
+    printf "0"
+}
+
+required_mb_for_file_download() {
+    local file_bytes="$1"
+    local required_mb="$MIN_FREE_SPACE_MB"
+
+    if [[ "$file_bytes" =~ ^[0-9]+$ ]] && [[ "$file_bytes" -gt 0 ]]; then
+        required_mb=$(( (file_bytes + 1024 * 1024 - 1) / 1024 / 1024 + DISK_MARGIN_MB_PER_FILE ))
+        if (( required_mb < MIN_FREE_SPACE_MB )); then
+            required_mb=$MIN_FREE_SPACE_MB
+        fi
+    fi
+
+    printf "%s" "$required_mb"
+}
+
+get_model_download_size_stats() {
+    local json_file="$1"
+    local stats_line=""
+
+    stats_line="$($JQ_CMD -r '
+        def to_bytes:
+            if . == null then 0
+            elif type == "number" then (if . < 0 then 0 else . end)
+            elif type == "string" then
+                if test("^[0-9]+$") then tonumber
+                elif test("^[0-9]+(\\.[0-9]+)?$") then (tonumber | floor)
+                else 0
+                end
+            else 0 end;
+        [.files.items[]?
+            | select(.download_url != null and .download_url != "" and .download_url != "null")
+        ] as $items
+        | ($items | map(.size | to_bytes) | add // 0) as $sum
+        | ($items | map(select((.size | to_bytes) == 0)) | length) as $unknown
+        | ($items | length) as $total
+        | "\($sum)|\($unknown)|\($total)"
+    ' "$json_file" 2>/dev/null)"
+
+    if [[ ! "$stats_line" =~ ^[0-9]+\|[0-9]+\|[0-9]+$ ]]; then
+        printf "0|0|0"
+        return
+    fi
+
+    printf "%s" "$stats_line"
+}
+
+ensure_model_download_plan() {
+    local json_file="$1"
+    local model_id="$2"
+    local probe_path="$3"
+    local stats_line=""
+    local known_bytes=0
+    local unknown_count=0
+    local file_count=0
+    local required_mb="$MIN_FREE_SPACE_MB"
+
+    stats_line="$(get_model_download_size_stats "$json_file")"
+    IFS='|' read -r known_bytes unknown_count file_count <<< "$stats_line"
+
+    if [[ ! "$known_bytes" =~ ^[0-9]+$ ]]; then
+        known_bytes=0
+    fi
+    if [[ ! "$unknown_count" =~ ^[0-9]+$ ]]; then
+        unknown_count=0
+    fi
+    if [[ ! "$file_count" =~ ^[0-9]+$ ]]; then
+        file_count=0
+    fi
+
+    if [[ "$known_bytes" -gt 0 ]]; then
+        local known_file_count=$((file_count - unknown_count))
+        local estimated_total_bytes="$known_bytes"
+
+        required_mb=$(( (known_bytes + 1024 * 1024 - 1) / 1024 / 1024 + DISK_MARGIN_MB_MODEL ))
+        if (( required_mb < MIN_FREE_SPACE_MB )); then
+            required_mb=$MIN_FREE_SPACE_MB
+        fi
+        echo -e "  ${CYAN}[DISK] Model $model_id — metadata reports $(format_bytes_human "$known_bytes") for $known_file_count file(s) with known size (of $file_count total)${NC}"
+        if [[ "$unknown_count" -gt 0 ]]; then
+            if [[ "$known_file_count" -gt 0 ]]; then
+                local estimated_unknown_bytes=$(( (known_bytes / known_file_count) * unknown_count ))
+                estimated_total_bytes=$((known_bytes + estimated_unknown_bytes))
+                required_mb=$(( (estimated_total_bytes + 1024 * 1024 - 1) / 1024 / 1024 + DISK_MARGIN_MB_MODEL ))
+                echo -e "  ${CYAN}[DISK] Model $model_id — $unknown_count file(s) without size; estimated +$(format_bytes_human "$estimated_unknown_bytes") from average of known sizes${NC}"
+            else
+                echo -e "  ${CYAN}[DISK] Model $model_id — $unknown_count file(s) without size; using ${MIN_FREE_SPACE_MB} MB minimum each${NC}"
+                required_mb=$((required_mb + unknown_count * MIN_FREE_SPACE_MB))
+            fi
+        fi
+    else
+        echo -e "  ${YELLOW}[DISK] Model $model_id — no file sizes in metadata; using ${MIN_FREE_SPACE_MB} MB minimum per file ($file_count file(s))${NC}"
+        if [[ "$file_count" -gt 0 ]]; then
+            required_mb=$((MIN_FREE_SPACE_MB * file_count))
+        fi
+    fi
+
+    log_disk_context "$probe_path" "before downloading model $model_id" "$required_mb"
+    ensure_min_free_space "$probe_path" "$required_mb" "before downloading model $model_id"
+}
+
+ensure_file_download_space() {
+    local probe_path="$1"
+    local filename="$2"
+    local file_bytes="$3"
+
+    local required_mb
+    required_mb="$(required_mb_for_file_download "$file_bytes")"
+
+    if [[ "$file_bytes" =~ ^[0-9]+$ ]] && [[ "$file_bytes" -gt 0 ]]; then
+        log_disk_context "$probe_path" "before downloading $filename (~$(format_bytes_human "$file_bytes") from metadata)" "$required_mb"
+    else
+        log_disk_context "$probe_path" "before downloading $filename (size unknown in metadata)" "$required_mb"
+    fi
+
+    ensure_min_free_space "$probe_path" "$required_mb" "before downloading $filename"
+}
+
 abort_no_space() {
     local context="$1"
     echo ""
+    log_disk_context "." "$context" ""
     echo -e "${RED}=======================================================${NC}"
     echo -e "${RED}STOPPING: No space left on device${NC}"
     echo -e "${RED}=======================================================${NC}"
@@ -471,6 +665,9 @@ download_file_with_guards() {
     if [[ "$DOWNLOAD_LAST_CURL_EXIT" -ne 0 ]]; then
         if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 3 ]]; then
             print_url_debug "curl exit 3 while ${context_label}"
+        fi
+        if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
+            log_disk_context "$(dirname "$output_path")" "curl exit 23 (often disk full) while ${context_label}" ""
         fi
         if [[ "$DOWNLOAD_LAST_CURL_EXIT" -ne 23 ]]; then
             rm -f "$tmp_path"
@@ -745,6 +942,214 @@ find_existing_assets_archive() {
     return 1
 }
 
+collect_model_root_asset_files() {
+    local model_dir="$1"
+    local exclude_name="$2"
+    local -n _out_array=$3
+
+    _out_array=()
+    while IFS= read -r -d '' file_path; do
+        _out_array+=("$(basename "$file_path")")
+    done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$exclude_name" -print0 2>/dev/null)
+}
+
+sum_compress_input_bytes() {
+    local model_dir="$1"
+    shift
+    local file_name file_path file_size total_bytes=0
+
+    for file_name in "$@"; do
+        file_path="${model_dir}/${file_name}"
+        if [[ ! -f "$file_path" ]]; then
+            continue
+        fi
+
+        file_size=$(get_file_size "$file_path")
+        if [[ "$file_size" =~ ^[0-9]+$ ]]; then
+            total_bytes=$((total_bytes + file_size))
+        fi
+    done
+
+    printf "%s" "$total_bytes"
+}
+
+ensure_compress_free_space() {
+    local model_dir="$1"
+    local context="$2"
+    local total_bytes="$3"
+    local required_mb="$MIN_FREE_SPACE_MB"
+    local payload_mb=0
+
+    if [[ "$total_bytes" =~ ^[0-9]+$ ]] && [[ "$total_bytes" -gt 0 ]]; then
+        payload_mb=$(( (total_bytes + 1024 * 1024 - 1) / 1024 / 1024 ))
+        required_mb=$((payload_mb + DISK_MARGIN_MB_MODEL))
+        if (( required_mb < MIN_FREE_SPACE_MB )); then
+            required_mb=$MIN_FREE_SPACE_MB
+        fi
+        echo -e "  ${CYAN}[DISK] ${context} — on-disk payload $(format_bytes_human "$total_bytes")${NC}"
+        if (( total_bytes > ZIP32_LIMIT_BYTES )); then
+            echo -e "  ${YELLOW}[ZIP-WARN] Payload exceeds 4 GiB classic ZIP limit; Zip64 will be used if your zip supports -fz${NC}"
+        elif (( total_bytes > ZIP64_RETRY_BYTES )); then
+            echo -e "  ${YELLOW}[ZIP-WARN] Large payload (~$(format_bytes_human "$total_bytes")); compression may require Zip64 or extra disk space${NC}"
+        fi
+    fi
+
+    log_disk_context "$model_dir" "$context" "$required_mb"
+    ensure_min_free_space "$model_dir" "$required_mb" "$context"
+}
+
+model_root_assets_are_standalone_zips() {
+    local model_dir="$1"
+    local exclude_name="$2"
+    local found_any=0
+    local file_path base_name lower_name
+
+    while IFS= read -r -d '' file_path; do
+        found_any=1
+        base_name=$(basename "$file_path")
+        lower_name=$(printf '%s' "$base_name" | tr '[:upper:]' '[:lower:]')
+        if [[ "$lower_name" != *.zip ]]; then
+            return 1
+        fi
+        if ! is_valid_archive_file "$file_path"; then
+            return 1
+        fi
+    done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$exclude_name" -print0 2>/dev/null)
+
+    [[ "$found_any" -eq 1 ]]
+}
+
+print_zip_compress_stderr() {
+    local zip_stderr="$1"
+
+    if [[ ! -s "$zip_stderr" ]]; then
+        return
+    fi
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ -n "$line" ]]; then
+            echo -e "  ${RED}[ZIP-DEBUG] zip: ${line}${NC}"
+        fi
+    done < "$zip_stderr"
+}
+
+print_zip_failure_debug() {
+    local archive_path="$1"
+    local compression_exit="$2"
+    local failure_reason="$3"
+    shift 3
+    local -a files_to_zip=("$@")
+
+    echo -e "  ${RED}[ZIP-DEBUG] Archive path: $archive_path${NC}"
+    echo -e "  ${RED}[ZIP-DEBUG] zip exit code: $compression_exit${NC}"
+    if [[ -n "$failure_reason" ]]; then
+        echo -e "  ${RED}[ZIP-DEBUG] ${failure_reason}${NC}"
+    fi
+    echo -e "  ${RED}[ZIP-DEBUG] Files considered for archive: ${#files_to_zip[@]}${NC}"
+    for file_name in "${files_to_zip[@]}"; do
+        echo "    $file_name"
+    done
+}
+
+run_zip_compress() {
+    local model_dir="$1"
+    local archive_name="$2"
+    local expected_bytes="${3:-0}"
+    shift 3
+    local -a files_to_zip=("$@")
+    local zip_stderr=""
+    local zip_list=""
+    local compression_exit=1
+    local batch_size=20
+    local index=0
+    local batch_end=0
+    local -a batch_files=()
+    local grow_mode=0
+    local zip_store_flags=(-q -0)
+    local zip_grow_flags=(-q -0 -g)
+    local tried_zip64=0
+
+    if [[ ${#files_to_zip[@]} -eq 0 ]]; then
+        return 1
+    fi
+
+    if [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > ZIP64_RETRY_BYTES )); then
+        zip_store_flags=(-q -fz -0)
+        zip_grow_flags=(-q -fz -0 -g)
+        echo -e "  ${CYAN}[ZIP] Using Zip64 mode (-fz) for $(format_bytes_human "$expected_bytes") payload${NC}"
+    fi
+
+    zip_stderr="$(mktemp "${TMPDIR:-/tmp}/mmf-zip-err.XXXXXX" 2>/dev/null || mktemp /tmp/mmf-zip-err.XXXXXX)"
+    zip_list="$(mktemp "${TMPDIR:-/tmp}/mmf-zip-list.XXXXXX" 2>/dev/null || mktemp /tmp/mmf-zip-list.XXXXXX)"
+
+    {
+        for file_name in "${files_to_zip[@]}"; do
+            printf '%s\n' "$file_name"
+        done
+    } > "$zip_list"
+
+    if command -v zip >/dev/null 2>&1; then
+        rm -f "${model_dir}/${archive_name}"
+        : > "$zip_stderr"
+        (cd "$model_dir" && zip "${zip_store_flags[@]}" "$archive_name" -@) < "$zip_list" 2>"$zip_stderr"
+        compression_exit=$?
+
+        if [[ "$compression_exit" -ne 0 ]]; then
+            rm -f "${model_dir}/${archive_name}"
+            : > "$zip_stderr"
+            grow_mode=0
+            index=0
+            while [[ "$index" -lt "${#files_to_zip[@]}" ]]; do
+                batch_end=$((index + batch_size))
+                batch_files=("${files_to_zip[@]:index:batch_size}")
+                if [[ "$grow_mode" -eq 0 ]]; then
+                    (cd "$model_dir" && zip "${zip_store_flags[@]}" "$archive_name" "${batch_files[@]}") 2>>"$zip_stderr"
+                    compression_exit=$?
+                    grow_mode=1
+                else
+                    (cd "$model_dir" && zip "${zip_grow_flags[@]}" "$archive_name" "${batch_files[@]}") 2>>"$zip_stderr"
+                    compression_exit=$?
+                fi
+
+                if [[ "$compression_exit" -ne 0 ]]; then
+                    break
+                fi
+
+                index=$batch_end
+            done
+        fi
+
+        if [[ "$compression_exit" -ne 0 ]] && [[ "$tried_zip64" -eq 0 ]] && [[ "${zip_store_flags[1]}" != "-fz" ]] \
+            && [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > ZIP64_RETRY_BYTES )); then
+            tried_zip64=1
+            echo -e "  ${YELLOW}[ZIP] Retrying archive creation with Zip64 (-fz)...${NC}"
+            rm -f "${model_dir}/${archive_name}"
+            : > "$zip_stderr"
+            (cd "$model_dir" && zip -q -fz -0 "$archive_name" -@) < "$zip_list" 2>"$zip_stderr"
+            compression_exit=$?
+        fi
+    fi
+
+    if [[ "$compression_exit" -ne 0 ]] && command -v tar >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}[ZIP] zip failed; trying tar fallback...${NC}"
+        rm -f "${model_dir}/${archive_name}"
+        : > "$zip_stderr"
+        (cd "$model_dir" && tar -a -cf "$archive_name" -T "$zip_list") 2>"$zip_stderr"
+        compression_exit=$?
+    fi
+
+    if [[ "$compression_exit" -ne 0 ]]; then
+        echo -e "  ${RED}[ZIP-DEBUG] zip/tar command failed — see zip stderr lines above${NC}"
+        if [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > ZIP32_LIMIT_BYTES )); then
+            echo -e "  ${RED}[ZIP-DEBUG] Payload is over 4 GiB; ensure Git Bash zip supports Zip64 (-fz) and the drive has $(format_bytes_human "$expected_bytes")+ free${NC}"
+        fi
+    fi
+
+    print_zip_compress_stderr "$zip_stderr"
+    rm -f "$zip_stderr" "$zip_list"
+    return "$compression_exit"
+}
+
 model_assets_already_archived() {
     local model_dir="$1"
     local source_json="$2"
@@ -752,7 +1157,16 @@ model_assets_already_archived() {
     local archive_base=""
 
     archive_base=$(get_model_archive_basename "$source_json" "$model_id")
-    find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null
+
+    if find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null; then
+        return 0
+    fi
+
+    if model_root_assets_are_standalone_zips "$model_dir" "${archive_base}.zip"; then
+        return 0
+    fi
+
+    return 1
 }
 
 count_model_progress_units() {
@@ -1022,6 +1436,11 @@ compress_non_json_assets() {
     local model_id="$3"
     local archive_base=""
     local existing_archive=""
+    local archive_name=""
+    local archive_path=""
+    local -a files_to_zip=()
+    local input_bytes=0
+    local compression_exit=0
 
     archive_base=$(get_model_archive_basename "$source_json" "$model_id")
     existing_archive=$(find_existing_assets_archive "$model_dir" "$archive_base" || true)
@@ -1033,34 +1452,31 @@ compress_non_json_assets() {
         return 0
     fi
 
-    local archive_name="${archive_base}.zip"
-    local archive_path
+    archive_name="${archive_base}.zip"
     archive_path=$(unique_output_path "$model_dir" "$archive_name")
     archive_name=$(basename "$archive_path")
 
-    local -a files_to_zip=()
-
-    while IFS= read -r -d '' file_path; do
-        files_to_zip+=("$(basename "$file_path")")
-    done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$archive_name" -print0)
+    collect_model_root_asset_files "$model_dir" "$archive_name" files_to_zip
 
     if [[ ${#files_to_zip[@]} -eq 0 ]]; then
         echo -e "  ${YELLOW}! No non-JSON files to compress${NC}"
         return 0
     fi
 
-    if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "creating ZIP archive for model $model_id"; then
+    if model_root_assets_are_standalone_zips "$model_dir" "$archive_name"; then
+        echo -e "  ${GREEN}[OK] Assets already delivered as standalone ZIP file(s); skipping outer archive wrap${NC}"
+        return 0
+    fi
+
+    input_bytes=$(sum_compress_input_bytes "$model_dir" "${files_to_zip[@]}")
+    if ! ensure_compress_free_space "$model_dir" "creating ZIP archive for model $model_id" "$input_bytes"; then
         abort_no_space "creating ZIP archive for model $model_id"
     fi
 
     rm -f "$archive_path"
-    local compression_exit=0
 
-    if command -v zip >/dev/null 2>&1; then
-        (cd "$model_dir" && zip -q "$archive_name" "${files_to_zip[@]}")
-        compression_exit=$?
-    elif command -v tar >/dev/null 2>&1; then
-        (cd "$model_dir" && tar -a -cf "$archive_name" "${files_to_zip[@]}")
+    if command -v zip >/dev/null 2>&1 || command -v tar >/dev/null 2>&1; then
+        run_zip_compress "$model_dir" "$archive_name" "$input_bytes" "${files_to_zip[@]}"
         compression_exit=$?
     else
         echo -e "  ${RED}[FAIL] Could not compress files: zip/tar not found${NC}"
@@ -1068,17 +1484,8 @@ compress_non_json_assets() {
     fi
 
     if [[ "$compression_exit" -ne 0 ]]; then
-        echo -e "  ${RED}[ZIP-DEBUG] Archive path: $archive_path${NC}"
-        echo -e "  ${RED}[ZIP-DEBUG] zip exit code: $compression_exit${NC}"
-        echo -e "  ${RED}[ZIP-DEBUG] Files considered for archive: ${#files_to_zip[@]}${NC}"
-        for file_name in "${files_to_zip[@]}"; do
-            echo "    $file_name"
-        done
-
+        print_zip_failure_debug "$archive_path" "$compression_exit" "" "${files_to_zip[@]}"
         rm -f "$archive_path"
-        if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "creating ZIP archive for model $model_id"; then
-            abort_no_space "creating ZIP archive for model $model_id"
-        fi
         echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
         return 1
     fi
@@ -1094,19 +1501,7 @@ compress_non_json_assets() {
     fi
 
     rm -f "$archive_path"
-
-    echo -e "  ${RED}[ZIP-DEBUG] Archive path: $archive_path${NC}"
-    echo -e "  ${RED}[ZIP-DEBUG] zip exit code: $compression_exit${NC}"
-    echo -e "  ${RED}[ZIP-DEBUG] Archive failed integrity validation after creation${NC}"
-    echo -e "  ${RED}[ZIP-DEBUG] Files considered for archive: ${#files_to_zip[@]}${NC}"
-    for file_name in "${files_to_zip[@]}"; do
-        echo "    $file_name"
-    done
-
-    if ! ensure_min_free_space "$model_dir" "$MIN_FREE_SPACE_MB" "verifying ZIP archive for model $model_id"; then
-        abort_no_space "creating ZIP archive for model $model_id"
-    fi
-
+    print_zip_failure_debug "$archive_path" "$compression_exit" "Archive failed integrity validation after creation" "${files_to_zip[@]}"
     echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
     return 1
 }
@@ -1185,7 +1580,7 @@ if [[ "$MODEL_IDS_FILTER_ACTIVE" -eq 1 ]]; then
     echo -e "${BLUE}Batch filter active: processing only the selected model IDs${NC}"
 fi
 echo -e "${BLUE}Output folders: $FOLDER_NAMING_FORMAT (readable names; legacy model_<id> still supported)${NC}"
-echo -e "${CYAN}Minimum free space required before each write: ${MIN_FREE_SPACE_MB} MB${NC}"
+echo -e "${CYAN}Disk checks: ${MIN_FREE_SPACE_MB} MB minimum; uses MMF metadata file sizes when available${NC}"
 
 if ! ensure_min_free_space "." "$MIN_FREE_SPACE_MB" "before starting download loop"; then
     abort_no_space "before starting download loop"
@@ -1203,7 +1598,7 @@ if [[ "$TEST_MODE" == true ]]; then
     # Find first JSON file with download URLs
     for json_file in "${model_json_files[@]}"; do
         model_id=$(basename "$json_file" | sed 's/model_//; s/.json//')
-        test_line=$($JQ_CMD -r '.files.items[]? | select(.download_url != null and .download_url != "") | "\(.filename // "")|\(.download_url)"' "$json_file" 2>/dev/null | head -1)
+        test_line=$($JQ_CMD -r '.files.items[]? | select(.download_url != null and .download_url != "") | "\(.filename // "")|\(.download_url // "")|\(.size // "")"' "$json_file" 2>/dev/null | head -1)
 
         if [[ -n "$test_line" ]]; then
             echo -e "${BLUE}Testing with model $model_id${NC}"
@@ -1211,6 +1606,14 @@ if [[ "$TEST_MODE" == true ]]; then
             # Get first file from this model
             filename="$(trim_field "$(echo "$test_line" | cut -d'|' -f1)")"
             download_url="$(trim_field "$(echo "$test_line" | cut -d'|' -f2)")"
+            test_file_size_meta="$(metadata_size_to_bytes "$(trim_field "$(echo "$test_line" | cut -d'|' -f3)")")"
+
+            if ! ensure_model_download_plan "$json_file" "$model_id" "."; then
+                abort_no_space "running test mode download for model $model_id"
+            fi
+            if ! ensure_file_download_space "." "$filename" "$test_file_size_meta"; then
+                abort_no_space "running test mode download for $filename"
+            fi
 
             if [[ -z "$download_url" || "$download_url" == "null" ]]; then
                 continue
@@ -1365,7 +1768,7 @@ for json_file in "${model_json_files[@]}"; do
     fi
 
     # Extract downloadable files from metadata
-    download_data=$($JQ_CMD -r '.files.items[]? | "\(.filename // "")|\(.download_url // "")"' "$json_file" 2>/dev/null)
+    download_data=$($JQ_CMD -r '.files.items[]? | "\(.filename // "")|\(.download_url // "")|\(.size // "")"' "$json_file" 2>/dev/null)
 
     if [[ -z "$download_data" ]]; then
         echo -e "${YELLOW}  ! No STL/ZIP file URLs found in metadata. Skipping model output.${NC}"
@@ -1376,7 +1779,11 @@ for json_file in "${model_json_files[@]}"; do
         echo ""
         continue
     elif [[ "$model_assets_complete" -eq 0 ]]; then
-        while IFS='|' read -r filename download_url; do
+        if ! ensure_model_download_plan "$json_file" "$model_id" "$model_dir"; then
+            abort_no_space "before downloading files for model $model_id"
+        fi
+
+        while IFS='|' read -r filename download_url file_size_meta; do
             if [[ -z "$filename" ]]; then
                 continue
             fi
@@ -1384,10 +1791,15 @@ for json_file in "${model_json_files[@]}"; do
             filename="$(trim_field "$filename")"
             filename=$(sanitize_filename "$filename")
             download_url="$(trim_field "$download_url")"
+            file_size_meta="$(metadata_size_to_bytes "$(trim_field "$file_size_meta")")"
 
             if [[ -z "$download_url" || "$download_url" == "null" ]]; then
                 echo -e "  ${YELLOW}! Skipping $filename: no download URL (likely not owned or unavailable).${NC}"
                 continue
+            fi
+
+            if ! ensure_file_download_space "$model_dir" "$filename" "$file_size_meta"; then
+                abort_no_space "before downloading $filename for model $model_id"
             fi
 
             canonical_output="${model_dir}/${filename}"
