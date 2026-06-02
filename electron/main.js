@@ -850,6 +850,60 @@ function appendPathEntry(currentPath, entryToAdd) {
     return [...entries, entryToAdd].join(path.delimiter);
 }
 
+function prependPathEntry(currentPath, entryToAdd) {
+    if (!entryToAdd) {
+        return currentPath || "";
+    }
+
+    const withoutEntry = (currentPath || "")
+        .split(path.delimiter)
+        .map((entry) => entry.trim())
+        .filter((entry) => {
+            if (!entry) {
+                return false;
+            }
+            if (isWindows) {
+                return entry.toLowerCase() !== entryToAdd.toLowerCase();
+            }
+            return entry !== entryToAdd;
+        });
+
+    return [entryToAdd, ...withoutEntry].join(path.delimiter);
+}
+
+function getGitUsrBinPath() {
+    if (!isWindows) {
+        return "";
+    }
+
+    const bashInfo = checkBash();
+    if (!bashInfo.path) {
+        return "";
+    }
+
+    const bashDir = path.dirname(bashInfo.path);
+    const usrBin = path.join(path.dirname(bashDir), "usr", "bin");
+    if (!fs.existsSync(usrBin)) {
+        return "";
+    }
+
+    return usrBin;
+}
+
+function getBundledZipToolsDir() {
+    if (!isWindows) {
+        return "";
+    }
+
+    const toolsDir = path.join(getScriptRoot(), "tools");
+    const zipExe = path.join(toolsDir, "zip.exe");
+    if (!fs.existsSync(zipExe)) {
+        return "";
+    }
+
+    return toolsDir;
+}
+
 function findFileRecursive(rootDir, fileName, depthRemaining = 4) {
     if (!rootDir || depthRemaining < 0 || !fs.existsSync(rootDir)) {
         return "";
@@ -966,14 +1020,23 @@ function checkJq() {
 }
 
 function buildProcessPathWithResolvedJq() {
-    const basePath = process.env.PATH || "";
-    const jqInfo = checkJq();
+    let result = process.env.PATH || "";
+    const bundledZipTools = getBundledZipToolsDir();
+    const gitUsrBin = getGitUsrBinPath();
 
-    if (!jqInfo.installed || !jqInfo.path) {
-        return basePath;
+    if (bundledZipTools) {
+        result = prependPathEntry(result, bundledZipTools);
+    }
+    if (gitUsrBin) {
+        result = prependPathEntry(result, gitUsrBin);
     }
 
-    return appendPathEntry(basePath, path.dirname(jqInfo.path));
+    const jqInfo = checkJq();
+    if (jqInfo.installed && jqInfo.path) {
+        result = appendPathEntry(result, path.dirname(jqInfo.path));
+    }
+
+    return result;
 }
 
 function checkPowerShell() {
@@ -1001,10 +1064,66 @@ function checkPowerShell() {
     };
 }
 
+function checkZipPackaging() {
+    if (!isWindows) {
+        const zipPath = whereCommand("zip");
+        if (!zipPath) {
+            return {
+                installed: false,
+                version: "",
+                path: "",
+                note: "Uses system zip when available (usually preinstalled on macOS)."
+            };
+        }
+
+        const versionResult = runCommand(zipPath, ["-v"]);
+        return {
+            installed: versionResult.ok,
+            version: firstLine(versionResult.stdout),
+            path: zipPath,
+            note: ""
+        };
+    }
+
+    const bundledToolsDir = getBundledZipToolsDir();
+    if (bundledToolsDir) {
+        const zipExe = path.join(bundledToolsDir, "zip.exe");
+        const versionResult = runCommand(zipExe, ["-v"]);
+        return {
+            installed: versionResult.ok,
+            version: firstLine(versionResult.stdout),
+            path: zipExe,
+            note: "Bundled Info-ZIP for Step 2 (no client install required)."
+        };
+    }
+
+    const zipPath = whereCommand("zip");
+    if (!zipPath) {
+        return {
+            installed: false,
+            version: "",
+            path: "",
+            note: "Missing tools/zip.exe — run npm run vendor:zip before building the Windows installer."
+        };
+    }
+
+    const versionResult = runCommand(zipPath, ["-v"]);
+    const lowerPath = zipPath.toLowerCase();
+    return {
+        installed: versionResult.ok,
+        version: firstLine(versionResult.stdout),
+        path: zipPath,
+        note: lowerPath.includes("miktex")
+            ? "PATH zip may be MiKTeX (unreliable). Rebuild the app with bundled tools/zip.exe."
+            : "Using zip from PATH (bundled tools/zip.exe not found)."
+    };
+}
+
 function getDependencySummary() {
     const bash = checkBash();
     const curl = checkSimpleCommand("curl", ["--version"]);
     const jq = checkJq();
+    const zipPackaging = checkZipPackaging();
     const powerShell = checkPowerShell();
     const winget = isWindows ? checkSimpleCommand("winget", ["--version"]) : { installed: false, version: "", path: "" };
     const brew = isMac ? checkSimpleCommand("brew", ["--version"]) : { installed: false, version: "", path: "" };
@@ -1042,6 +1161,16 @@ function getDependencySummary() {
             note: jq.pathInjected
                 ? "Detected from WinGet package path and available for app runs."
                 : ""
+        },
+        {
+            key: "zip",
+            displayName: isWindows ? "zip (Step 2 packaging)" : "zip",
+            required: false,
+            installed: zipPackaging.installed,
+            version: zipPackaging.version,
+            path: zipPackaging.path,
+            packageId: "",
+            note: zipPackaging.note
         },
         {
             key: "powershell",

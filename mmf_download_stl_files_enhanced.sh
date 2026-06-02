@@ -85,6 +85,11 @@ MODEL_IDS_FILTER_ACTIVE=0
 ASSET_PROGRESS_TOTAL_UNITS=0
 ASSET_PROGRESS_DONE_UNITS=0
 ASSET_PROGRESS_MODELS_DONE=0
+ZIP_VALIDATE_REASON=""
+ZIP_COMPRESS_TOOL=""
+ZIP_COMPRESS_PHASE=""
+ZIP_COMPRESS_FAILURE=""
+ZIP_COMPRESS_STDERR=""
 
 emit_progress_event() {
     if [[ "${MMF_EMIT_PROGRESS:-0}" != "1" ]]; then
@@ -573,17 +578,221 @@ abort_no_space() {
     exit 1
 }
 
-validate_zip_integrity() {
-    local zip_file="$1"
-
+resolve_unzip_executable() {
     if command -v unzip >/dev/null 2>&1; then
-        unzip -tqq "$zip_file" >/dev/null 2>&1
-        return $?
+        command -v unzip
+        return 0
+    fi
+    return 1
+}
+
+resolve_bundled_zip_executable() {
+    local candidate=""
+    local -a bundled_candidates=()
+
+    bundled_candidates+=(
+        "${SCRIPT_DIR}/tools/zip.exe"
+        "${SCRIPT_DIR}/zip.exe"
+    )
+
+    for candidate in "${bundled_candidates[@]}"; do
+        if [[ -f "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+resolve_zip_executable() {
+    local candidate=""
+    local bash_bin=""
+    local path_zip=""
+    local -a prefer_candidates=()
+
+    if candidate="$(resolve_bundled_zip_executable 2>/dev/null)"; then
+        printf '%s' "$candidate"
+        return 0
     fi
 
-    if command -v zip >/dev/null 2>&1; then
-        zip -T "$zip_file" >/dev/null 2>&1
-        return $?
+    prefer_candidates+=("/usr/bin/zip")
+
+    bash_bin="$(command -v bash 2>/dev/null || true)"
+    if [[ -n "$bash_bin" ]]; then
+        if [[ "$bash_bin" == */bin/bash.exe ]]; then
+            prefer_candidates+=("${bash_bin%/bin/bash.exe}/usr/bin/zip")
+        elif [[ "$bash_bin" == */bin/bash ]]; then
+            prefer_candidates+=("${bash_bin%/bin/bash}/usr/bin/zip")
+        fi
+    fi
+
+    for candidate in "${prefer_candidates[@]}"; do
+        if [[ -n "$candidate" && -f "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+
+    if path_zip="$(command -v zip 2>/dev/null)"; then
+        if is_nonstandard_zip_executable "$path_zip"; then
+            return 1
+        fi
+        printf '%s' "$path_zip"
+        return 0
+    fi
+
+    return 1
+}
+
+is_nonstandard_zip_executable() {
+    local zip_exe="$1"
+    local lower_path=""
+
+    lower_path="$(printf '%s' "$zip_exe" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower_path" == *miktex* ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+describe_archive_tool() {
+    local label="$1"
+    local exe_path="$2"
+    local version_line=""
+
+    if [[ -z "$exe_path" ]]; then
+        echo -e "  ${RED}[ZIP-DIAG] ${label}: not found${NC}"
+        return 1
+    fi
+
+    if [[ ! -f "$exe_path" ]]; then
+        echo -e "  ${RED}[ZIP-DIAG] ${label}: file missing (${exe_path})${NC}"
+        return 1
+    fi
+
+    version_line="$("$exe_path" -v 2>&1 | head -n 1 || true)"
+    echo -e "  ${CYAN}[ZIP-DIAG] ${label}: ${exe_path}${NC}"
+    if [[ -n "$version_line" ]]; then
+        echo -e "  ${CYAN}[ZIP-DIAG]   ${version_line}${NC}"
+    fi
+    return 0
+}
+
+print_archive_toolchain_hint() {
+    if resolve_bundled_zip_executable >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}[ZIP-DIAG] Bundled tools/zip.exe exists but was not used — reinstall or update the desktop app.${NC}"
+        return
+    fi
+
+    echo -e "  ${YELLOW}[ZIP-DIAG] Windows \"Compress to ZIP\" in Explorer is NOT the same as the zip command.${NC}"
+    echo -e "  ${YELLOW}[ZIP-DIAG] Install Info-ZIP in Git Bash: pacman -S zip — or use a desktop build that includes tools/zip.exe.${NC}"
+    echo -e "  ${YELLOW}[ZIP-DIAG] Then restart the app and re-run Step 2 (downloads are skipped; only packaging retries).${NC}"
+}
+
+print_archive_failure_report() {
+    local archive_path="$1"
+    local failure_kind="$2"
+    shift 2
+    local -a files_to_zip=("$@")
+    local zip_exe=""
+    local unzip_exe=""
+    local archive_size="unknown"
+
+    if [[ -f "$archive_path" ]]; then
+        archive_size="$(get_file_size "$archive_path") bytes"
+    elif [[ -e "$archive_path" ]]; then
+        archive_size="exists but not a regular file"
+    else
+        archive_size="missing"
+    fi
+
+    echo -e "  ${RED}[ZIP-DIAG] Archive packaging failed (${failure_kind})${NC}"
+    echo -e "  ${RED}[ZIP-DIAG] Target archive: ${archive_path} (${archive_size})${NC}"
+
+    zip_exe="$(resolve_zip_executable 2>/dev/null || true)"
+    unzip_exe="$(resolve_unzip_executable 2>/dev/null || true)"
+    describe_archive_tool "zip" "${zip_exe:-}"
+    describe_archive_tool "unzip" "${unzip_exe:-}"
+
+    if [[ -n "$ZIP_COMPRESS_TOOL" ]]; then
+        echo -e "  ${CYAN}[ZIP-DIAG] zip used for this attempt: ${ZIP_COMPRESS_TOOL}${NC}"
+    fi
+    if [[ -n "$ZIP_COMPRESS_PHASE" ]]; then
+        echo -e "  ${CYAN}[ZIP-DIAG] Last zip phase: ${ZIP_COMPRESS_PHASE}${NC}"
+    fi
+    if [[ -n "$ZIP_COMPRESS_FAILURE" ]]; then
+        echo -e "  ${RED}[ZIP-DIAG] Compress error: ${ZIP_COMPRESS_FAILURE}${NC}"
+    fi
+    if [[ -n "$ZIP_VALIDATE_REASON" ]]; then
+        echo -e "  ${RED}[ZIP-DIAG] Validation: ${ZIP_VALIDATE_REASON}${NC}"
+    fi
+    if [[ -n "$ZIP_COMPRESS_STDERR" ]]; then
+        echo -e "  ${RED}[ZIP-DIAG] zip stderr:${NC}"
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ -n "$line" ]]; then
+                echo -e "  ${RED}[ZIP-DIAG]   ${line}${NC}"
+            fi
+        done <<< "$ZIP_COMPRESS_STDERR"
+    fi
+
+    echo -e "  ${RED}[ZIP-DIAG] Files to package (${#files_to_zip[@]}):${NC}"
+    for file_name in "${files_to_zip[@]}"; do
+        echo "    ${file_name}"
+    done
+
+    if [[ -n "$zip_exe" ]] && is_nonstandard_zip_executable "$zip_exe"; then
+        echo -e "  ${YELLOW}[ZIP-DIAG] The zip in PATH looks like MiKTeX, not Git/Info-ZIP — common cause of packaging failures on Windows.${NC}"
+    elif [[ -z "$zip_exe" ]]; then
+        echo -e "  ${YELLOW}[ZIP-DIAG] zip was not found in PATH when this report was generated.${NC}"
+    fi
+
+    print_archive_toolchain_hint
+}
+
+validate_zip_integrity() {
+    local zip_file="$1"
+    local unzip_exe=""
+    local zip_exe=""
+    local validate_output=""
+
+    ZIP_VALIDATE_REASON=""
+
+    if [[ ! -f "$zip_file" ]]; then
+        ZIP_VALIDATE_REASON="archive file is missing"
+        return 1
+    fi
+
+    if [[ ! -s "$zip_file" ]]; then
+        ZIP_VALIDATE_REASON="archive file is empty"
+        return 1
+    fi
+
+    if unzip_exe="$(resolve_unzip_executable 2>/dev/null)"; then
+        validate_output="$(unzip -tqq "$zip_file" 2>&1)"
+        if [[ "$?" -eq 0 ]]; then
+            return 0
+        fi
+
+        ZIP_VALIDATE_REASON="unzip -t failed"
+        if [[ -n "$validate_output" ]]; then
+            ZIP_VALIDATE_REASON="${ZIP_VALIDATE_REASON}: ${validate_output}"
+        fi
+        return 1
+    fi
+
+    if zip_exe="$(resolve_zip_executable 2>/dev/null)"; then
+        validate_output="$("$zip_exe" -T "$zip_file" 2>&1)"
+        if [[ "$?" -eq 0 ]]; then
+            return 0
+        fi
+
+        ZIP_VALIDATE_REASON="zip -T failed"
+        if [[ -n "$validate_output" ]]; then
+            ZIP_VALIDATE_REASON="${ZIP_VALIDATE_REASON}: ${validate_output}"
+        fi
+        return 1
     fi
 
     # If we cannot validate archive internals, keep prior behavior.
@@ -998,6 +1207,30 @@ ensure_compress_free_space() {
     ensure_min_free_space "$model_dir" "$required_mb" "$context"
 }
 
+is_rar_or_7z_name() {
+    local lower_name="$1"
+
+    case "$lower_name" in
+        *.rar|*.7z)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+zip_wrapper_name_for_archive() {
+    local archive_file_name="$1"
+    local base_name="${archive_file_name%.*}"
+
+    if [[ -z "$base_name" ]]; then
+        base_name="$archive_file_name"
+    fi
+
+    printf '%s.zip' "$base_name"
+}
+
 model_root_assets_are_standalone_zips() {
     local model_dir="$1"
     local exclude_name="$2"
@@ -1019,7 +1252,136 @@ model_root_assets_are_standalone_zips() {
     [[ "$found_any" -eq 1 ]]
 }
 
-print_zip_compress_stderr() {
+wrap_archive_file_in_zip() {
+    local model_dir="$1"
+    local archive_file_name="$2"
+    local model_id="$3"
+    local zip_name=""
+    local zip_path=""
+    local archive_path=""
+    local input_bytes=0
+    local compression_exit=0
+
+    zip_name=$(zip_wrapper_name_for_archive "$archive_file_name")
+    zip_path="${model_dir}/${zip_name}"
+    archive_path="${model_dir}/${archive_file_name}"
+
+    if [[ ! -f "$archive_path" ]]; then
+        return 0
+    fi
+
+    if is_valid_archive_file "$zip_path"; then
+        local existing_zip_size
+        existing_zip_size=$(get_file_size "$zip_path")
+        echo -e "  ${GREEN}[SKIP] ZIP wrapper already exists: ${zip_name} (${existing_zip_size} bytes)${NC}"
+        rm -f "$archive_path"
+        return 0
+    fi
+
+    input_bytes=$(get_file_size "$archive_path")
+    if ! ensure_compress_free_space "$model_dir" "wrapping ${archive_file_name} in ${zip_name} for model $model_id" "$input_bytes"; then
+        abort_no_space "wrapping ${archive_file_name} for model $model_id"
+    fi
+
+    rm -f "$zip_path"
+    echo -e "  ${CYAN}[ZIP] Wrapping ${archive_file_name} → ${zip_name}${NC}"
+
+    if ! resolve_zip_executable >/dev/null 2>&1; then
+        ZIP_COMPRESS_FAILURE="zip executable not found (expected bundled tools/zip.exe or system zip in PATH)"
+        print_archive_failure_report "$zip_path" "zip command failed (exit 127)" "$archive_file_name"
+        echo -e "  ${RED}[FAIL] Failed to create ${zip_name}${NC}"
+        return 1
+    fi
+
+    run_zip_compress "$model_dir" "$zip_name" "$input_bytes" "$archive_file_name"
+    compression_exit=$?
+
+    if [[ "$compression_exit" -ne 0 ]]; then
+        print_archive_failure_report "$zip_path" "zip command failed (exit ${compression_exit})" "$archive_file_name"
+        rm -f "$zip_path"
+        echo -e "  ${RED}[FAIL] Failed to create ${zip_name}${NC}"
+        return 1
+    fi
+
+    if is_valid_archive_file "$zip_path"; then
+        rm -f "$archive_path"
+        local zip_size
+        zip_size=$(get_file_size "$zip_path")
+        echo -e "  ${GREEN}[OK] Created ${zip_name} (contains ${archive_file_name}, ${zip_size} bytes)${NC}"
+        return 0
+    fi
+
+    rm -f "$zip_path"
+    if [[ -z "$ZIP_VALIDATE_REASON" ]]; then
+        ZIP_VALIDATE_REASON="archive failed integrity check after zip reported success"
+    fi
+    print_archive_failure_report "$zip_path" "integrity validation failed" "$archive_file_name"
+    echo -e "  ${RED}[FAIL] Failed to create ${zip_name}${NC}"
+    return 1
+}
+
+wrap_rar_7z_archives_individually() {
+    local model_dir="$1"
+    local model_id="$2"
+    shift 2
+    local -a archive_files=("$@")
+    local archive_file_name=""
+
+    for archive_file_name in "${archive_files[@]}"; do
+        if ! wrap_archive_file_in_zip "$model_dir" "$archive_file_name" "$model_id"; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+model_assets_already_archived() {
+    local model_dir="$1"
+    local source_json="$2"
+    local model_id="$3"
+    local archive_base=""
+    local -a all_files=()
+    local file_name lower_name zip_wrapper=""
+    local has_loose_files=0
+    local has_rar_7z=0
+
+    archive_base=$(get_model_archive_basename "$source_json" "$model_id")
+    collect_model_root_asset_files "$model_dir" "" all_files
+
+    if [[ ${#all_files[@]} -eq 0 ]]; then
+        return 1
+    fi
+
+    for file_name in "${all_files[@]}"; do
+        lower_name=$(printf '%s' "$file_name" | tr '[:upper:]' '[:lower:]')
+        if is_rar_or_7z_name "$lower_name"; then
+            has_rar_7z=1
+            zip_wrapper=$(zip_wrapper_name_for_archive "$file_name")
+            if ! is_valid_archive_file "${model_dir}/${zip_wrapper}"; then
+                return 1
+            fi
+        elif [[ "$lower_name" == *.zip ]]; then
+            if ! is_valid_archive_file "${model_dir}/${file_name}"; then
+                return 1
+            fi
+        else
+            has_loose_files=1
+        fi
+    done
+
+    if [[ "$has_loose_files" -eq 0 ]]; then
+        return 0
+    fi
+
+    if find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
+append_zip_compress_stderr() {
     local zip_stderr="$1"
 
     if [[ ! -s "$zip_stderr" ]]; then
@@ -1028,27 +1390,12 @@ print_zip_compress_stderr() {
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ -n "$line" ]]; then
-            echo -e "  ${RED}[ZIP-DEBUG] zip: ${line}${NC}"
+            if [[ -n "$ZIP_COMPRESS_STDERR" ]]; then
+                ZIP_COMPRESS_STDERR+=$'\n'
+            fi
+            ZIP_COMPRESS_STDERR+="$line"
         fi
     done < "$zip_stderr"
-}
-
-print_zip_failure_debug() {
-    local archive_path="$1"
-    local compression_exit="$2"
-    local failure_reason="$3"
-    shift 3
-    local -a files_to_zip=("$@")
-
-    echo -e "  ${RED}[ZIP-DEBUG] Archive path: $archive_path${NC}"
-    echo -e "  ${RED}[ZIP-DEBUG] zip exit code: $compression_exit${NC}"
-    if [[ -n "$failure_reason" ]]; then
-        echo -e "  ${RED}[ZIP-DEBUG] ${failure_reason}${NC}"
-    fi
-    echo -e "  ${RED}[ZIP-DEBUG] Files considered for archive: ${#files_to_zip[@]}${NC}"
-    for file_name in "${files_to_zip[@]}"; do
-        echo "    $file_name"
-    done
 }
 
 run_zip_compress() {
@@ -1058,7 +1405,7 @@ run_zip_compress() {
     shift 3
     local -a files_to_zip=("$@")
     local zip_stderr=""
-    local zip_list=""
+    local zip_exe=""
     local compression_exit=1
     local batch_size=20
     local index=0
@@ -1069,7 +1416,13 @@ run_zip_compress() {
     local zip_grow_flags=(-q -0 -g)
     local tried_zip64=0
 
+    ZIP_COMPRESS_TOOL=""
+    ZIP_COMPRESS_PHASE=""
+    ZIP_COMPRESS_FAILURE=""
+    ZIP_COMPRESS_STDERR=""
+
     if [[ ${#files_to_zip[@]} -eq 0 ]]; then
+        ZIP_COMPRESS_FAILURE="no files to package"
         return 1
     fi
 
@@ -1079,94 +1432,89 @@ run_zip_compress() {
         echo -e "  ${CYAN}[ZIP] Using Zip64 mode (-fz) for $(format_bytes_human "$expected_bytes") payload${NC}"
     fi
 
-    zip_stderr="$(mktemp "${TMPDIR:-/tmp}/mmf-zip-err.XXXXXX" 2>/dev/null || mktemp /tmp/mmf-zip-err.XXXXXX)"
-    zip_list="$(mktemp "${TMPDIR:-/tmp}/mmf-zip-list.XXXXXX" 2>/dev/null || mktemp /tmp/mmf-zip-list.XXXXXX)"
-
-    {
-        for file_name in "${files_to_zip[@]}"; do
-            printf '%s\n' "$file_name"
-        done
-    } > "$zip_list"
-
-    if command -v zip >/dev/null 2>&1; then
-        rm -f "${model_dir}/${archive_name}"
-        : > "$zip_stderr"
-        (cd "$model_dir" && zip "${zip_store_flags[@]}" "$archive_name" -@) < "$zip_list" 2>"$zip_stderr"
-        compression_exit=$?
-
-        if [[ "$compression_exit" -ne 0 ]]; then
-            rm -f "${model_dir}/${archive_name}"
-            : > "$zip_stderr"
-            grow_mode=0
-            index=0
-            while [[ "$index" -lt "${#files_to_zip[@]}" ]]; do
-                batch_end=$((index + batch_size))
-                batch_files=("${files_to_zip[@]:index:batch_size}")
-                if [[ "$grow_mode" -eq 0 ]]; then
-                    (cd "$model_dir" && zip "${zip_store_flags[@]}" "$archive_name" "${batch_files[@]}") 2>>"$zip_stderr"
-                    compression_exit=$?
-                    grow_mode=1
-                else
-                    (cd "$model_dir" && zip "${zip_grow_flags[@]}" "$archive_name" "${batch_files[@]}") 2>>"$zip_stderr"
-                    compression_exit=$?
-                fi
-
-                if [[ "$compression_exit" -ne 0 ]]; then
-                    break
-                fi
-
-                index=$batch_end
-            done
-        fi
-
-        if [[ "$compression_exit" -ne 0 ]] && [[ "$tried_zip64" -eq 0 ]] && [[ "${zip_store_flags[1]}" != "-fz" ]] \
-            && [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > ZIP64_RETRY_BYTES )); then
-            tried_zip64=1
-            echo -e "  ${YELLOW}[ZIP] Retrying archive creation with Zip64 (-fz)...${NC}"
-            rm -f "${model_dir}/${archive_name}"
-            : > "$zip_stderr"
-            (cd "$model_dir" && zip -q -fz -0 "$archive_name" -@) < "$zip_list" 2>"$zip_stderr"
-            compression_exit=$?
-        fi
+    if ! zip_exe="$(resolve_zip_executable 2>/dev/null)"; then
+        ZIP_COMPRESS_FAILURE="zip executable not found (expected bundled tools/zip.exe or system zip in PATH)"
+        return 127
     fi
 
-    if [[ "$compression_exit" -ne 0 ]] && command -v tar >/dev/null 2>&1; then
-        echo -e "  ${YELLOW}[ZIP] zip failed; trying tar fallback...${NC}"
+    ZIP_COMPRESS_TOOL="$zip_exe"
+    if is_nonstandard_zip_executable "$zip_exe"; then
+        echo -e "  ${YELLOW}[ZIP-WARN] Using non-standard zip: ${zip_exe} (MiKTeX is a common cause — prefer Git /usr/bin/zip)${NC}"
+    fi
+
+    zip_stderr="$(mktemp "${TMPDIR:-/tmp}/mmf-zip-err.XXXXXX" 2>/dev/null || mktemp /tmp/mmf-zip-err.XXXXXX)"
+
+    rm -f "${model_dir}/${archive_name}"
+    : > "$zip_stderr"
+    ZIP_COMPRESS_PHASE="batch create (${#files_to_zip[@]} file(s))"
+    grow_mode=0
+    index=0
+    while [[ "$index" -lt "${#files_to_zip[@]}" ]]; do
+        batch_end=$((index + batch_size))
+        batch_files=("${files_to_zip[@]:index:batch_size}")
+        if [[ "$grow_mode" -eq 0 ]]; then
+            (cd "$model_dir" && "$zip_exe" "${zip_store_flags[@]}" "$archive_name" "${batch_files[@]}") 2>>"$zip_stderr"
+            compression_exit=$?
+            grow_mode=1
+        else
+            (cd "$model_dir" && "$zip_exe" "${zip_grow_flags[@]}" "$archive_name" "${batch_files[@]}") 2>>"$zip_stderr"
+            compression_exit=$?
+        fi
+
+        if [[ "$compression_exit" -ne 0 ]]; then
+            ZIP_COMPRESS_FAILURE="zip exited ${compression_exit} during ${ZIP_COMPRESS_PHASE}"
+            append_zip_compress_stderr "$zip_stderr"
+            rm -f "$zip_stderr"
+            return "$compression_exit"
+        fi
+
+        index=$batch_end
+    done
+
+    if [[ "$compression_exit" -ne 0 ]] && [[ "$tried_zip64" -eq 0 ]] && [[ "${zip_store_flags[1]}" != "-fz" ]] \
+        && [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > ZIP64_RETRY_BYTES )); then
+        tried_zip64=1
+        echo -e "  ${YELLOW}[ZIP] Retrying archive creation with Zip64 (-fz)...${NC}"
         rm -f "${model_dir}/${archive_name}"
         : > "$zip_stderr"
-        (cd "$model_dir" && tar -a -cf "$archive_name" -T "$zip_list") 2>"$zip_stderr"
-        compression_exit=$?
+        ZIP_COMPRESS_PHASE="Zip64 batch retry"
+        grow_mode=0
+        index=0
+        zip_store_flags=(-q -fz -0)
+        zip_grow_flags=(-q -fz -0 -g)
+        while [[ "$index" -lt "${#files_to_zip[@]}" ]]; do
+            batch_end=$((index + batch_size))
+            batch_files=("${files_to_zip[@]:index:batch_size}")
+            if [[ "$grow_mode" -eq 0 ]]; then
+                (cd "$model_dir" && "$zip_exe" "${zip_store_flags[@]}" "$archive_name" "${batch_files[@]}") 2>>"$zip_stderr"
+                compression_exit=$?
+                grow_mode=1
+            else
+                (cd "$model_dir" && "$zip_exe" "${zip_grow_flags[@]}" "$archive_name" "${batch_files[@]}") 2>>"$zip_stderr"
+                compression_exit=$?
+            fi
+
+            if [[ "$compression_exit" -ne 0 ]]; then
+                ZIP_COMPRESS_FAILURE="zip exited ${compression_exit} during ${ZIP_COMPRESS_PHASE}"
+                append_zip_compress_stderr "$zip_stderr"
+                rm -f "$zip_stderr"
+                return "$compression_exit"
+            fi
+
+            index=$batch_end
+        done
     fi
 
     if [[ "$compression_exit" -ne 0 ]]; then
-        echo -e "  ${RED}[ZIP-DEBUG] zip/tar command failed — see zip stderr lines above${NC}"
+        ZIP_COMPRESS_FAILURE="zip exited ${compression_exit} during ${ZIP_COMPRESS_PHASE}"
         if [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > ZIP32_LIMIT_BYTES )); then
-            echo -e "  ${RED}[ZIP-DEBUG] Payload is over 4 GiB; ensure Git Bash zip supports Zip64 (-fz) and the drive has $(format_bytes_human "$expected_bytes")+ free${NC}"
+            ZIP_COMPRESS_FAILURE="${ZIP_COMPRESS_FAILURE}; payload exceeds 4 GiB — need zip with Zip64 (-fz)"
         fi
     fi
 
-    print_zip_compress_stderr "$zip_stderr"
-    rm -f "$zip_stderr" "$zip_list"
+    append_zip_compress_stderr "$zip_stderr"
+    rm -f "$zip_stderr"
     return "$compression_exit"
-}
-
-model_assets_already_archived() {
-    local model_dir="$1"
-    local source_json="$2"
-    local model_id="$3"
-    local archive_base=""
-
-    archive_base=$(get_model_archive_basename "$source_json" "$model_id")
-
-    if find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null; then
-        return 0
-    fi
-
-    if model_root_assets_are_standalone_zips "$model_dir" "${archive_base}.zip"; then
-        return 0
-    fi
-
-    return 1
 }
 
 count_model_progress_units() {
@@ -1438,7 +1786,11 @@ compress_non_json_assets() {
     local existing_archive=""
     local archive_name=""
     local archive_path=""
+    local -a all_files=()
+    local -a rar_7z_files=()
     local -a files_to_zip=()
+    local file_name=""
+    local lower_name=""
     local input_bytes=0
     local compression_exit=0
 
@@ -1456,15 +1808,34 @@ compress_non_json_assets() {
     archive_path=$(unique_output_path "$model_dir" "$archive_name")
     archive_name=$(basename "$archive_path")
 
-    collect_model_root_asset_files "$model_dir" "$archive_name" files_to_zip
+    collect_model_root_asset_files "$model_dir" "$archive_name" all_files
 
-    if [[ ${#files_to_zip[@]} -eq 0 ]]; then
+    if [[ ${#all_files[@]} -eq 0 ]]; then
         echo -e "  ${YELLOW}! No non-JSON files to compress${NC}"
         return 0
     fi
 
     if model_root_assets_are_standalone_zips "$model_dir" "$archive_name"; then
         echo -e "  ${GREEN}[OK] Assets already delivered as standalone ZIP file(s); skipping outer archive wrap${NC}"
+        return 0
+    fi
+
+    for file_name in "${all_files[@]}"; do
+        lower_name=$(printf '%s' "$file_name" | tr '[:upper:]' '[:lower:]')
+        if is_rar_or_7z_name "$lower_name"; then
+            rar_7z_files+=("$file_name")
+        elif [[ "$lower_name" != *.zip ]]; then
+            files_to_zip+=("$file_name")
+        fi
+    done
+
+    if [[ ${#rar_7z_files[@]} -gt 0 ]]; then
+        if ! wrap_rar_7z_archives_individually "$model_dir" "$model_id" "${rar_7z_files[@]}"; then
+            return 1
+        fi
+    fi
+
+    if [[ ${#files_to_zip[@]} -eq 0 ]]; then
         return 0
     fi
 
@@ -1475,16 +1846,16 @@ compress_non_json_assets() {
 
     rm -f "$archive_path"
 
-    if command -v zip >/dev/null 2>&1 || command -v tar >/dev/null 2>&1; then
+    if resolve_zip_executable >/dev/null 2>&1; then
         run_zip_compress "$model_dir" "$archive_name" "$input_bytes" "${files_to_zip[@]}"
         compression_exit=$?
     else
-        echo -e "  ${RED}[FAIL] Could not compress files: zip/tar not found${NC}"
-        return 1
+        ZIP_COMPRESS_FAILURE="zip executable not found (expected bundled tools/zip.exe or system zip in PATH)"
+        compression_exit=127
     fi
 
     if [[ "$compression_exit" -ne 0 ]]; then
-        print_zip_failure_debug "$archive_path" "$compression_exit" "" "${files_to_zip[@]}"
+        print_archive_failure_report "$archive_path" "zip command failed (exit ${compression_exit})" "${files_to_zip[@]}"
         rm -f "$archive_path"
         echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
         return 1
@@ -1501,7 +1872,10 @@ compress_non_json_assets() {
     fi
 
     rm -f "$archive_path"
-    print_zip_failure_debug "$archive_path" "$compression_exit" "Archive failed integrity validation after creation" "${files_to_zip[@]}"
+    if [[ -z "$ZIP_VALIDATE_REASON" ]]; then
+        ZIP_VALIDATE_REASON="archive failed integrity check after zip reported success"
+    fi
+    print_archive_failure_report "$archive_path" "integrity validation failed" "${files_to_zip[@]}"
     echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
     return 1
 }
@@ -1581,6 +1955,20 @@ if [[ "$MODEL_IDS_FILTER_ACTIVE" -eq 1 ]]; then
 fi
 echo -e "${BLUE}Output folders: $FOLDER_NAMING_FORMAT (readable names; legacy model_<id> still supported)${NC}"
 echo -e "${CYAN}Disk checks: ${MIN_FREE_SPACE_MB} MB minimum; uses MMF metadata file sizes when available${NC}"
+
+zip_startup_exe=""
+if zip_startup_exe="$(resolve_zip_executable 2>/dev/null)"; then
+    if [[ "$zip_startup_exe" == *"/tools/zip.exe" ]] || [[ "$zip_startup_exe" == *"\\tools\\zip.exe" ]]; then
+        echo -e "${CYAN}[ZIP] Using bundled Info-ZIP: ${zip_startup_exe}${NC}"
+    elif is_nonstandard_zip_executable "$zip_startup_exe"; then
+        echo -e "${YELLOW}[ZIP-WARN] zip in PATH may be MiKTeX (${zip_startup_exe}) — install Git zip or use the desktop build with tools/zip.exe${NC}"
+    fi
+else
+    echo -e "${YELLOW}[ZIP-WARN] zip command not found — STL multi-file models need tools/zip.exe (desktop build) or Git Bash: pacman -S zip${NC}"
+fi
+if ! resolve_unzip_executable >/dev/null 2>&1; then
+    echo -e "${YELLOW}[ZIP-WARN] unzip not found — archive validation will be limited${NC}"
+fi
 
 if ! ensure_min_free_space "." "$MIN_FREE_SPACE_MB" "before starting download loop"; then
     abort_no_space "before starting download loop"
@@ -1758,9 +2146,13 @@ for json_file in "${model_json_files[@]}"; do
     existing_assets_archive=""
 
     if model_assets_already_archived "$model_dir" "$json_file" "$model_id"; then
-        existing_assets_archive=$(find_existing_assets_archive "$model_dir" "$(get_model_archive_basename "$json_file" "$model_id")")
-        existing_archive_size=$(get_file_size "$existing_assets_archive")
-        echo -e "  ${GREEN}[SKIP] Model assets already archived in $(basename "$existing_assets_archive") (${existing_archive_size} bytes) — skipping STL/ZIP re-download.${NC}"
+        existing_assets_archive=$(find_existing_assets_archive "$model_dir" "$(get_model_archive_basename "$json_file" "$model_id")" || true)
+        if [[ -n "$existing_assets_archive" ]]; then
+            existing_archive_size=$(get_file_size "$existing_assets_archive")
+            echo -e "  ${GREEN}[SKIP] Model assets already archived in $(basename "$existing_assets_archive") (${existing_archive_size} bytes) — skipping STL/ZIP re-download.${NC}"
+        else
+            echo -e "  ${GREEN}[SKIP] Model assets already archived (per-file ZIP wrapper(s)) — skipping STL/ZIP re-download.${NC}"
+        fi
         model_file_successful_downloads=$downloadable_file_count
         model_assets_complete=1
         models_zip_skipped=$((models_zip_skipped + 1))

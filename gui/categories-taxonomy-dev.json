@@ -1,0 +1,262 @@
+[
+  {
+    "id": "84090b11-969a-4d69-a336-79ecd0550b0e",
+    "name": "Wargaming",
+    "slug": "wargaming",
+    "description": "3D models designed for tabletop strategy and miniature war games. Includes figures, vehicles, and scenery inspired by a variety of settings — from fantasy worlds to historical and futuristic battlefields.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-20T17:08:35.562+00:00",
+    "parent_id": null
+  },
+  {
+    "id": "a969d0e9-7800-4d26-9f6f-b0acf82d8700",
+    "name": "Trench",
+    "slug": "trench",
+    "description": "3D models of fortified positions, bunkers, and battlefront scenery for realistic wartime dioramas.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-20T17:28:55.588+00:00",
+    "parent_id": "84090b11-969a-4d69-a336-79ecd0550b0e"
+  },
+  {
+    "id": "ce17eb27-a915-47ae-9dcb-ab9e0be8650c",
+    "name": "Fantasy",
+    "slug": "fantasy",
+    "description": "Miniatures and assets based on magical realms, mythical creatures, and heroic warriors.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-20T17:36:21.984+00:00",
+    "parent_id": "84090b11-969a-4d69-a336-79ecd0550b0e"
+  },
+  {
+    "id": "215ad53e-4521-44be-ae85-11a5236e2b2a",
+    "name": "Sci-Fi",
+    "slug": "sci-fi",
+    "description": "Futuristic soldiers, machines, and alien forces perfect for intergalactic warfare settings.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-20T17:37:39.628+00:00",
+    "parent_id": "84090b11-969a-4d69-a336-79ecd0550b0e"
+  },
+  {
+    "id": "60490c23-bea2-45b2-b97c-950f9c8d302c",
+    "name": "Historical",
+    "slug": "historical",
+    "description": "Realistic figures and vehicles inspired by actual wars, armies, and periods of history.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-20T17:37:55.138+00:00",
+    "parent_id": "84090b11-969a-4d69-a336-79ecd0550b0e"
+  },
+  {
+    "id": "71d1f5c7-5f5d-4e32-9243-4316444e6882",
+    "name": "Vehicles",
+    "slug": "vehicles",
+    "description": "Tanks, aircraft, and transport units crafted for use in both historical and fictional battles.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-20T17:39:18.279+00:00",
+    "parent_id": "84090b11-969a-4d69-a336-79ecd0550b0e"
+  },
+  {
+    "id": "cece50c4-b7d9-422f-99ea-a8b2964bb8b9",
+    "name": "RPG",
+    "slug": "rpg",
+    "description": "A collection of 3D models perfect for tabletop or digital role-playing games. Features playable characters, enemies, summonable creatures, and mounts that bring depth and immersion to any adventure.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-20T17:50:05.984+00:00",
+    "parent_id": null
+  },
+  {
+    "id": "d7203b18-2a90-448a-a00c-3f1e0251b484",
+    "name": "Player Characters",
+    "slug": "player-characters",
+    "description": "Detailed hero models representing adventurers, warriors, mages, and rogues of all kinds.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-20T18:24:46.948+00:00",
+    "parent_id": "cece50c4-b7d9-422f-99ea-a8b2964bb8b9"
+  },
+  {
+    "id": "f3e0277f-495b-42a4-8cbb-dae8d77cae17",
+    "name": "NPCs",
+    "slug": "npcs",
+    "description": "Non-playable characters that populate worlds: villagers, merchants, guards, and other story figures.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:10:29.934+00:00",
+    "parent_id": "cece50c4-b7d9-422f-99ea-a8b2964bb8b9"
+  },
+  {
+    "id": "de1e3f10-113f-4ec0-a222-a188012b094d",
+    "name": "Monsters and Bosses",
+    "slug": "monsters-and-bosses",
+    "description": "Enemies and powerful creatures designed to challenge players in epic encounters.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:10:49.425+00:00",
+    "parent_id": "cece50c4-b7d9-422f-99ea-a8b2964bb8b9"
+  },
+  {
+    "id": "4481b0f0-7523-41c1-920b-f346e6f44dfe",
+    "name": "Familiars and Summons",
+    "slug": "familiars-and-summons",
+    "description": "Companion creatures and magical entities that assist heroes in combat or exploration.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:11:06.446+00:00",
+    "parent_id": "cece50c4-b7d9-422f-99ea-a8b2964bb8b9"
+  },
+  {
+    "id": "f47b5005-c8fa-4a7a-b3a8-77ee25a95b09",
+    "name": "Mounts and Vehicles",
+    "slug": "mounts-and-vehicles",
+    "description": "Creatures and machines for transportation and battle, from horses to airships.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:11:15.853+00:00",
+    "parent_id": "cece50c4-b7d9-422f-99ea-a8b2964bb8b9"
+  },
+  {
+    "id": "b659901a-ef5d-4467-a4b7-7b881d2f9a7d",
+    "name": "Terrain",
+    "slug": "terrain",
+    "description": "3D scenery models made to build immersive environments. From detailed dungeons and ruined landscapes to urban settings and starships, this category provides everything needed to set the stage for your campaigns and dioramas.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:16:33.705+00:00",
+    "parent_id": null
+  },
+  {
+    "id": "be4bc7a2-7d16-4a93-ab48-ae92ce1d19b5",
+    "name": "Dungeons and Interiors",
+    "slug": "dungeons-and-interiors",
+    "description": "Modular 3D walls, floors, and props for building detailed indoor environments such as dungeons, castles, and sci-fi bases.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:18:19.718+00:00",
+    "parent_id": "b659901a-ef5d-4467-a4b7-7b881d2f9a7d"
+  },
+  {
+    "id": "1afacff0-4f45-4f05-a739-6ab2d4da8651",
+    "name": "Wilderness and Ruins",
+    "slug": "wilderness-and-ruins",
+    "description": "Natural landscapes, ancient ruins, and outdoor structures ideal for creating immersive adventure settings and battlefields.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:18:28.797+00:00",
+    "parent_id": "b659901a-ef5d-4467-a4b7-7b881d2f9a7d"
+  },
+  {
+    "id": "13752ad7-4800-4053-9732-0d76a70b6a6f",
+    "name": "Urban and Industrial",
+    "slug": "urban-and-industrial",
+    "description": "3D assets depicting cities, factories, and modern or dystopian environments suitable for urban combat and storytelling scenes.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:18:38.002+00:00",
+    "parent_id": "b659901a-ef5d-4467-a4b7-7b881d2f9a7d"
+  },
+  {
+    "id": "b2aab2f4-ce44-4439-a5ba-895452ed37d4",
+    "name": "Sci-Fi and Starships",
+    "slug": "sci-fi-and-starships",
+    "description": "Spaceships, futuristic architecture, and high-tech environments designed for science fiction tabletop or digital worlds.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:18:45.844+00:00",
+    "parent_id": "b659901a-ef5d-4467-a4b7-7b881d2f9a7d"
+  },
+  {
+    "id": "10746d4a-060f-4f3a-a09c-0228acff22f3",
+    "name": "Bases",
+    "slug": "bases",
+    "description": "3D models of bases and stands for miniatures, available in various shapes and styles. Ideal for showcasing your figures, with options ranging from simple supports to highly detailed scenic toppers.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:17:06.81+00:00",
+    "parent_id": null
+  },
+  {
+    "id": "4401c1b4-3c1d-46ff-bcba-ad247ca519aa",
+    "name": "Round and Oval",
+    "slug": "round-and-oval",
+    "description": "Standard round and oval 3D bases for displaying miniatures in dynamic poses or individual showcases.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:18:56.785+00:00",
+    "parent_id": "10746d4a-060f-4f3a-a09c-0228acff22f3"
+  },
+  {
+    "id": "c323e220-9edb-4cdf-8da8-fa40532097bb",
+    "name": "Square and Rectangular",
+    "slug": "square-and-rectangular",
+    "description": "Classic square and rectangular bases designed for grid-based games and regiment-style formations.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:19:05.567+00:00",
+    "parent_id": "10746d4a-060f-4f3a-a09c-0228acff22f3"
+  },
+  {
+    "id": "de9a4def-6964-42bc-b46a-6a47d8e2f465",
+    "name": "Scenic Toppers",
+    "slug": "scenic-toppers",
+    "description": "Decorative 3D base toppers featuring terrain details, rubble, or thematic elements that enhance miniature presentation.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:19:14.904+00:00",
+    "parent_id": "10746d4a-060f-4f3a-a09c-0228acff22f3"
+  },
+  {
+    "id": "12ae3f5b-1cf3-43ad-8cd9-72dd1a2686b6",
+    "name": "Bits and Modkits",
+    "slug": "bits-and-modkits",
+    "description": "3D accessory and modular parts for customizing and enhancing miniatures. Includes weapons, heads, visual effects, and interchangeable components that allow you to create unique and detailed designs.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:17:29.704+00:00",
+    "parent_id": null
+  },
+  {
+    "id": "3a886b58-e972-4184-9bf1-972f9a7d178a",
+    "name": "Weapons and Arms",
+    "slug": "weapons-and-arms",
+    "description": "3D-modeled weapons, shields, and interchangeable arms for customizing or upgrading miniature figures.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:19:25.846+00:00",
+    "parent_id": "12ae3f5b-1cf3-43ad-8cd9-72dd1a2686b6"
+  },
+  {
+    "id": "b2e04d00-720f-43df-82b1-0ed2b244faeb",
+    "name": "Heads and Helmets",
+    "slug": "heads-and-helmets",
+    "description": "A variety of 3D head and helmet designs for personalizing miniatures and adding visual diversity.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:19:34.457+00:00",
+    "parent_id": "12ae3f5b-1cf3-43ad-8cd9-72dd1a2686b6"
+  },
+  {
+    "id": "c2fe9d0d-c8b8-489f-bfcf-11865808e7af",
+    "name": "Accessories and Effects",
+    "slug": "accessories-and-effects",
+    "description": "Additional parts such as armor pieces, cloaks, magic effects, and visual details to enhance your models.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:19:43.786+00:00",
+    "parent_id": "12ae3f5b-1cf3-43ad-8cd9-72dd1a2686b6"
+  },
+  {
+    "id": "46f5ca93-afa4-445b-9306-07c6f363eb75",
+    "name": "Modular Parts",
+    "slug": "modular-parts",
+    "description": "Connectable 3D components that enable advanced customization and kitbashing across different models.",
+    "icon_url": null,
+    "is_active": true,
+    "created_at": "2025-10-23T07:19:51.224+00:00",
+    "parent_id": "12ae3f5b-1cf3-43ad-8cd9-72dd1a2686b6"
+  }
+]

@@ -7,11 +7,12 @@
   "license": "MIT",
   "scripts": {
     "icons:generate": "node scripts/generate-icons.js",
+    "vendor:zip": "node scripts/fetch-windows-zip.js",
     "dev": "electron .",
     "start": "electron .",
     "pack": "npm run icons:generate && electron-builder --dir",
     "dist": "npm run icons:generate && electron-builder",
-    "dist:win": "npm run icons:generate && electron-builder --win nsis",
+    "dist:win": "npm run icons:generate && npm run vendor:zip && electron-builder --win nsis",
     "dist:mac": "npm run icons:generate && electron-builder --mac dmg zip"
   },
   "build": {
@@ -21,7 +22,8 @@
     "asarUnpack": [
       "*.sh",
       "*.ps1",
-      "build/**/*"
+      "build/**/*",
+      "tools/**/*"
     ],
     "directories": {
       "output": "dist",
@@ -31,6 +33,7 @@
       "electron/**/*",
       "gui/**/*",
       "build/**/*",
+      "tools/**/*",
       "*.sh",
       "*.ps1",
       "*.md",
