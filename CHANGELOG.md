@@ -1,10 +1,18 @@
 # Changelog
 
+## [1.5.0] — 2026-05-28
+
+### Added
+- **Bundled Info-ZIP for Windows** (`tools/zip.exe`): Step 2 packaging works without MiKTeX, Explorer, or `pacman -S zip`. Included in `npm run dist:win` via `npm run vendor:zip`.
+- **Optional categories for download:** no category selection required; compact model JSON uses `categories: []` when empty. Categorize per model in your upload tool instead of one global batch label.
+- **Per-file RAR/7z ZIP wrappers:** each `.rar`/`.7z` becomes its own `.zip` (`pack.rar` → `pack.zip`); multiple archives yield multiple ZIPs, not one combined archive.
+
+### Changed
+- Step 2 ZIP failures emit **`[ZIP-DIAG]`** logs (tool paths, stderr, validation). Removed misleading `tar`→`.zip` fallback; prefers bundled/Git `zip` over MiKTeX in PATH.
+
 ## [1.4.1] — 2026-05-22
 
 ### Added
-- **Optional categories for download:** Step 2 no longer requires a category/subcategory selection. Empty selection writes `categories: []` in compact model JSON; categorize per model in your upload tool instead of one global label for the whole batch.
-- **Bundled Info-ZIP for Windows** (`tools/zip.exe` + DLLs): Step 2 no longer depends on MiKTeX, Explorer, or `pacman -S zip` on client machines. Refresh via `npm run vendor:zip`; included automatically in `npm run dist:win`.
 - **Manual retry IDs** in the desktop UI (below Auto load source): paste failed model IDs, click **Load manual IDs** (enabled only when at least one valid ID is present). Replaces the visible list for a targeted batch run, unmarks those IDs from batch completed progress, and keeps cached catalog names from prior auto-loads. Step 2 still skips files already on disk in the same download folder.
 
 ### Fixed
