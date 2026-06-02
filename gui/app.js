@@ -515,7 +515,8 @@ function updateCategorySelectionSummary() {
     const validation = getCategorySelectionValidation();
 
     if (!validation.hasSelection) {
-        elements.categorySelectionSummary.textContent = "No categories selected.";
+        elements.categorySelectionSummary.textContent =
+            "No categories selected (optional). JSON will use categories: []";
         return;
     }
 
@@ -530,7 +531,7 @@ function updateCategorySelectionSummary() {
 function buildCategorySelectionPreviewText() {
     const snapshot = getCategorySelectionSnapshot();
     if (snapshot.length === 0) {
-        return "No categories selected.";
+        return "No categories selected (optional for download).\nCompact model JSON will include categories: [].\nYou can assign categories per model in your upload application.";
     }
 
     const tree = buildCategoryTree(categoryTaxonomyItems);
@@ -2042,12 +2043,12 @@ function buildRequirementState() {
             help: "Duplicates are allowed but not recommended."
         },
         {
-            label: "Category selection is valid",
-            pass: categoryState.isValid,
-            required: true,
+            label: "Categories (optional for download)",
+            pass: !categoryState.hasSelection || categoryState.isValid,
+            required: false,
             help: categoryState.hasSelection
-                ? "Each selected category must include at least one subcategory."
-                : "No category selected (optional)."
+                ? "Each selected category must include at least one subcategory, or clear all categories."
+                : "Leave empty when downloading mixed libraries; categorize each model when uploading to your store app."
         },
         {
             label: "Enhanced Step 2 test mode is acknowledged",
@@ -3259,8 +3260,8 @@ function validateBeforeRun(stepKey) {
             return "Step 2 requires both PHPSESSID and cf_clearance.";
         }
 
-        if (!state.categoryState.isValid) {
-            return "Each selected category must include at least one subcategory before Step 2.";
+        if (state.categoryState.hasSelection && !state.categoryState.isValid) {
+            return "Each selected category must include at least one subcategory, or clear all categories to download without metadata categories.";
         }
     }
 

@@ -3,6 +3,7 @@
 ## [1.4.1] — 2026-05-22
 
 ### Added
+- **Optional categories for download:** Step 2 no longer requires a category/subcategory selection. Empty selection writes `categories: []` in compact model JSON; categorize per model in your upload tool instead of one global label for the whole batch.
 - **Bundled Info-ZIP for Windows** (`tools/zip.exe` + DLLs): Step 2 no longer depends on MiKTeX, Explorer, or `pacman -S zip` on client machines. Refresh via `npm run vendor:zip`; included automatically in `npm run dist:win`.
 - **Manual retry IDs** in the desktop UI (below Auto load source): paste failed model IDs, click **Load manual IDs** (enabled only when at least one valid ID is present). Replaces the visible list for a targeted batch run, unmarks those IDs from batch completed progress, and keeps cached catalog names from prior auto-loads. Step 2 still skips files already on disk in the same download folder.
 
