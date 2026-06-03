@@ -6,7 +6,7 @@ This app Downloads files you own from MyMiniFactory.
 This is not a scraper, it uses API calls.
 This does not download files that you do not own.
 
-Download Here -> https://github.com/Zerohaus/STL_Bulk_Downloader/releases/tag/141
+Download Here -> https://github.com/Zerohaus/STL_Bulk_Downloader/releases
 
 # WINDOWS
 Steps:
