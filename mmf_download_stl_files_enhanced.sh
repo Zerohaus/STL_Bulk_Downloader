@@ -75,6 +75,7 @@ MODEL_IDS_FILTER_RAW="${MMF_MODEL_IDS_FILTER:-}"
 DOWNLOAD_LAST_CURL_EXIT=0
 DOWNLOAD_LAST_HTTP_CODE=""
 DOWNLOAD_LAST_TMP_FILE=""
+DOWNLOAD_LAST_FAILURE_REASON=""
 DOWNLOAD_LAST_ORIGINAL_URL=""
 DOWNLOAD_LAST_SANITIZED_URL=""
 DOWNLOAD_LAST_URL_SANITIZATION_NOTE=""
@@ -565,15 +566,65 @@ ensure_file_download_space() {
     ensure_min_free_space "$probe_path" "$required_mb" "before downloading $filename"
 }
 
+disk_space_is_low() {
+    local probe_path="$1"
+    local available_kb
+
+    available_kb="$(get_available_kb "$probe_path")"
+    if [[ ! "$available_kb" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+
+    (( available_kb < MIN_FREE_SPACE_MB * 1024 ))
+}
+
+print_write_failure_hints() {
+    echo -e "${CYAN}Free disk space looks sufficient; this is usually not a full-disk issue.${NC}"
+    echo ""
+    echo -e "${CYAN}Common causes on Windows:${NC}"
+    echo "  1. Antivirus or cloud sync (OneDrive, etc.) locking files during download"
+    echo "  2. Special characters in filenames — MyMiniFactory often uses Greek lookalike letters in Roman numerals"
+    echo "  3. Output folder permissions or a read-only drive"
+    echo "  4. Path too long — try a shorter downloads folder path (e.g. D:\\MMF)"
+    echo ""
+    echo -e "${CYAN}Try:${NC}"
+    echo "  - Exclude the downloads folder from real-time antivirus scanning"
+    echo "  - Use a short local path (not a synced folder) and re-run Step 2"
+}
+
 abort_no_space() {
     local context="$1"
+    local probe_path="${2:-.}"
+
     echo ""
-    log_disk_context "." "$context" ""
+    log_disk_context "$probe_path" "$context" ""
     echo -e "${RED}=======================================================${NC}"
     echo -e "${RED}STOPPING: No space left on device${NC}"
     echo -e "${RED}=======================================================${NC}"
     echo -e "${YELLOW}Context: ${context}${NC}"
     echo "Free disk space and run the script again."
+    echo "Only validated complete files are kept; partial files are discarded."
+    exit 1
+}
+
+abort_write_failure() {
+    local context="$1"
+    local probe_path="${2:-.}"
+
+    echo ""
+    log_disk_context "$probe_path" "$context" ""
+    echo -e "${RED}=======================================================${NC}"
+    if disk_space_is_low "$probe_path"; then
+        echo -e "${RED}STOPPING: No space left on device${NC}"
+        echo -e "${RED}=======================================================${NC}"
+        echo -e "${YELLOW}Context: ${context}${NC}"
+        echo "Free disk space and run the script again."
+    else
+        echo -e "${RED}STOPPING: Could not write download to disk${NC}"
+        echo -e "${RED}=======================================================${NC}"
+        echo -e "${YELLOW}Context: ${context}${NC}"
+        print_write_failure_hints
+    fi
     echo "Only validated complete files are kept; partial files are discarded."
     exit 1
 }
@@ -820,6 +871,23 @@ is_valid_download_file() {
     return 0
 }
 
+is_reusable_download_file() {
+    local file_path="$1"
+    local logical_name="$2"
+    local expected_bytes="${3:-}"
+    local actual_bytes=""
+
+    is_valid_download_file "$file_path" "$logical_name" || return 1
+
+    if [[ "$expected_bytes" =~ ^[0-9]+$ ]] && [[ "$expected_bytes" -gt 0 ]]; then
+        actual_bytes="$(get_file_size "$file_path")"
+        [[ "$actual_bytes" =~ ^[0-9]+$ ]] || return 1
+        [[ "$actual_bytes" -eq "$expected_bytes" ]] || return 1
+    fi
+
+    return 0
+}
+
 download_file_with_guards() {
     local download_url="$1"
     local output_path="$2"
@@ -832,6 +900,7 @@ download_file_with_guards() {
     DOWNLOAD_LAST_CURL_EXIT=0
     DOWNLOAD_LAST_HTTP_CODE=""
     DOWNLOAD_LAST_TMP_FILE="$tmp_path"
+    DOWNLOAD_LAST_FAILURE_REASON=""
     DOWNLOAD_LAST_ORIGINAL_URL="$download_url"
     DOWNLOAD_LAST_SANITIZED_URL=""
     DOWNLOAD_LAST_URL_SANITIZATION_NOTE=""
@@ -898,12 +967,14 @@ download_file_with_guards() {
     if ! mv -f "$tmp_path" "$output_path"; then
         rm -f "$tmp_path"
         DOWNLOAD_LAST_TMP_FILE=""
+        DOWNLOAD_LAST_FAILURE_REASON="rename"
 
         if ! ensure_min_free_space "$output_path" "$MIN_FREE_SPACE_MB" "saving ${context_label}"; then
             DOWNLOAD_LAST_CURL_EXIT=23
             return 23
         fi
 
+        echo -e "  ${RED}[FAIL] Downloaded file but could not save as $(basename "$output_path") (rename/move failed)${NC}"
         return 1
     fi
 
@@ -924,6 +995,19 @@ cleanup_orphan_part_files() {
     fi
 }
 
+# Map Greek/Cyrillic lookalike letters to Latin (common in MMF Roman-numeral filenames).
+# Requires perl (bundled with Git for Windows at usr/bin/perl; usually present on macOS/Linux too).
+normalize_unicode_homoglyphs() {
+    local input="$1"
+
+    if command -v perl >/dev/null 2>&1; then
+        printf '%s' "$input" | perl -CS -pe 'tr/\x{0399}\x{03B9}\x{0406}\x{0456}\x{0410}\x{0430}\x{0412}\x{0432}\x{0415}\x{0435}\x{041E}\x{043E}\x{0420}\x{0440}\x{0421}\x{0441}\x{0422}\x{0442}\x{0423}\x{0443}\x{0425}\x{0445}/IiIiAaVvEeOoRrSsTtUuXx/'
+        return
+    fi
+
+    printf '%s' "$input"
+}
+
 sanitize_filename() {
     local original_name="$1"
     local sanitized_name
@@ -932,6 +1016,7 @@ sanitize_filename() {
 
     sanitized_name=$(printf "%s" "$original_name" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')
     sanitized_name="$(trim_field "$sanitized_name")"
+    sanitized_name="$(normalize_unicode_homoglyphs "$sanitized_name")"
     sanitized_name=$(printf "%s" "$sanitized_name" | sed -E "s/[<>:\"/\\|?*]/_/g; s/'//g; s/[[:space:]]+/ /g")
     sanitized_name="${sanitized_name// /_}"
     sanitized_name=$(printf "%s" "$sanitized_name" | sed -E 's/_+/_/g')
@@ -992,6 +1077,7 @@ sanitize_folder_name() {
 
     cleaned="$(printf "%s" "$name" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
     cleaned="$(trim_field "$cleaned")"
+    cleaned="$(normalize_unicode_homoglyphs "$cleaned")"
     cleaned="$(printf "%s" "$cleaned" | sed -E "s/[<>:\"/\\|?*]/_/g; s/'//g; s/[[:space:]]+/ /g")"
     cleaned="${cleaned// /_}"
     cleaned="$(printf "%s" "$cleaned" | sed -E 's/_+/_/g; s/[. ]+$//; s/^[_.]+//; s/[_.]+$//')"
@@ -1100,6 +1186,80 @@ unique_output_path() {
         fi
         suffix=$((suffix + 1))
     done
+}
+
+filename_with_suffix() {
+    local target_name="$1"
+    local suffix="$2"
+    local name_without_ext="$target_name"
+    local extension=""
+
+    if [[ "$target_name" == *.* ]] && [[ "$target_name" != .* ]]; then
+        name_without_ext="${target_name%.*}"
+        extension=".${target_name##*.}"
+    fi
+
+    printf "%s_%s%s" "$name_without_ext" "$suffix" "$extension"
+}
+
+reserved_output_name_exists() {
+    local reserved_names="$1"
+    local target_name="$2"
+    local reserved_name=""
+
+    while IFS= read -r reserved_name; do
+        if [[ -n "$reserved_name" && "$reserved_name" == "$target_name" ]]; then
+            return 0
+        fi
+    done <<< "$reserved_names"
+
+    return 1
+}
+
+reserve_model_output_name() {
+    local target_name="$1"
+    local reserved_names="$2"
+    local candidate_name="$target_name"
+    local suffix=1
+
+    while reserved_output_name_exists "$reserved_names" "$candidate_name"; do
+        candidate_name="$(filename_with_suffix "$target_name" "$suffix")"
+        suffix=$((suffix + 1))
+    done
+
+    printf "%s" "$candidate_name"
+}
+
+model_has_sanitized_filename_collisions() {
+    local download_data="$1"
+    local raw_filename=""
+    local sanitized_name=""
+    local sanitized_names=""
+    local duplicate_name=""
+
+    while IFS='|' read -r raw_filename _ _; do
+        if [[ -z "$raw_filename" ]]; then
+            continue
+        fi
+
+        sanitized_name="$(sanitize_filename "$(trim_field "$raw_filename")")"
+        if [[ -z "$sanitized_name" ]]; then
+            continue
+        fi
+
+        sanitized_names="${sanitized_names}${sanitized_name}"$'\n'
+    done <<< "$download_data"
+
+    if [[ -z "$sanitized_names" ]]; then
+        return 1
+    fi
+
+    duplicate_name="$(printf '%s' "$sanitized_names" | sort | uniq -d | head -1)"
+    if [[ -n "$duplicate_name" ]]; then
+        return 0
+    fi
+
+    return 1
 }
 
 get_model_archive_basename() {
@@ -1756,7 +1916,14 @@ download_model_images() {
             if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                 rm -f "$output_path" "${output_path}.part"
                 emit_asset_progress_unit "$model_id" "image" "failed"
-                abort_no_space "downloading image $(basename "$output_path")"
+                abort_write_failure "downloading image $(basename "$output_path")" "$(dirname "$output_path")"
+            fi
+
+            if [[ "$DOWNLOAD_LAST_FAILURE_REASON" == "rename" ]]; then
+                consecutive_failures=$((consecutive_failures + 1))
+                rm -f "$output_path" "${output_path}.part"
+                emit_asset_progress_unit "$model_id" "image" "failed"
+                continue
             fi
 
             if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]]; then
@@ -2029,7 +2196,7 @@ if [[ "$TEST_MODE" == true ]]; then
             if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                 rm -f "$test_file" "${test_file}.part"
                 emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
-                abort_no_space "running test mode download"
+                abort_write_failure "running test mode download" "$(dirname "$test_file")"
             fi
 
             if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]] && is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
@@ -2175,6 +2342,12 @@ for json_file in "${model_json_files[@]}"; do
             abort_no_space "before downloading files for model $model_id"
         fi
 
+        reserved_model_output_names=""
+        model_sanitized_name_collisions=0
+        if model_has_sanitized_filename_collisions "$download_data"; then
+            model_sanitized_name_collisions=1
+        fi
+
         while IFS='|' read -r filename download_url file_size_meta; do
             if [[ -z "$filename" ]]; then
                 continue
@@ -2190,13 +2363,37 @@ for json_file in "${model_json_files[@]}"; do
                 continue
             fi
 
+            reserved_filename="$(reserve_model_output_name "$filename" "$reserved_model_output_names")"
+            reserved_model_output_names="${reserved_model_output_names}${reserved_filename}"$'\n'
+            if [[ "$reserved_filename" != "$filename" ]]; then
+                echo -e "  ${CYAN}[NAME] Sanitized filename collision: ${filename} -> ${reserved_filename}${NC}"
+                filename="$reserved_filename"
+            fi
+
             if ! ensure_file_download_space "$model_dir" "$filename" "$file_size_meta"; then
                 abort_no_space "before downloading $filename for model $model_id"
             fi
 
             canonical_output="${model_dir}/${filename}"
+            can_skip_existing=0
+            has_known_size=0
+            if [[ "$file_size_meta" =~ ^[0-9]+$ ]] && [[ "$file_size_meta" -gt 0 ]]; then
+                has_known_size=1
+            fi
 
-            if [[ -f "$canonical_output" ]] && is_valid_download_file "$canonical_output" "$filename"; then
+            if [[ -f "$canonical_output" ]] && is_reusable_download_file "$canonical_output" "$filename" "$file_size_meta"; then
+                if [[ "$model_sanitized_name_collisions" -eq 1 ]] && [[ "$has_known_size" -eq 0 ]]; then
+                    echo -e "  ${YELLOW}! Not skipping $(basename "$canonical_output"): multiple metadata files map to the same sanitized name and size is unknown.${NC}"
+                else
+                    can_skip_existing=1
+                fi
+            elif [[ -f "$canonical_output" ]] && is_valid_download_file "$canonical_output" "$filename"; then
+                if [[ "$has_known_size" -eq 1 ]]; then
+                    echo -e "  ${YELLOW}! Existing file size differs from metadata for $(basename "$canonical_output"); re-downloading.${NC}"
+                fi
+            fi
+
+            if [[ "$can_skip_existing" -eq 1 ]]; then
                 file_size=$(get_file_size "$canonical_output")
                 echo -e "  ${GREEN}[SKIP] Already downloaded: $(basename "$canonical_output") (${file_size} bytes)${NC}"
                 successful_downloads=$((successful_downloads + 1))
@@ -2207,7 +2404,7 @@ for json_file in "${model_json_files[@]}"; do
             fi
 
             if [[ -e "$canonical_output" ]]; then
-                echo -e "  ${YELLOW}! Removing invalid existing file: $(basename "$canonical_output")${NC}"
+                echo -e "  ${YELLOW}! Removing invalid or mismatched existing file: $(basename "$canonical_output")${NC}"
                 rm -f "$canonical_output"
             fi
 
@@ -2228,7 +2425,25 @@ for json_file in "${model_json_files[@]}"; do
                 if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                     rm -f "$output_file" "${output_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
                     emit_asset_progress_unit "$model_id" "file" "failed"
-                    abort_no_space "downloading file $(basename "$output_file")"
+                    abort_write_failure "downloading file $(basename "$output_file")" "$model_dir"
+                fi
+
+                if [[ "$DOWNLOAD_LAST_FAILURE_REASON" == "rename" ]]; then
+                    consecutive_failures=$((consecutive_failures + 1))
+                    rm -f "$output_file" "${output_file}.part"
+                    emit_asset_progress_unit "$model_id" "file" "failed"
+
+                    if [[ $consecutive_failures -ge $MAX_CONSECUTIVE_FAILURES ]]; then
+                        echo ""
+                        echo -e "${RED}=======================================================${NC}"
+                        echo -e "${RED}STOPPING: $MAX_CONSECUTIVE_FAILURES consecutive save failures${NC}"
+                        echo -e "${RED}=======================================================${NC}"
+                        print_write_failure_hints
+                        exit 1
+                    fi
+
+                    sleep "$STL_FILE_DELAY_SEC"
+                    continue
                 fi
 
                 if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]]; then

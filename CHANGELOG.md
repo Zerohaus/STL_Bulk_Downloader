@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.1] — 2026-06-08
+
+### Fixed
+- Step 2 no longer reports **“No space left on device”** when `df` shows plenty of free space. `curl` exit 23 and save/rename failures are now labeled **“Could not write download to disk”** with troubleshooting hints (antivirus, synced folders, permissions, long paths).
+- Step 2 normalizes **Greek/Cyrillic homoglyphs** in file and folder names (e.g. MMF Roman numerals like `XXIΙ` → `XXII`) so Windows/Git Bash writes succeed more reliably.
+- Step 2 keeps sanitized filename collisions as separate downloads (e.g. `XXII.rar` and homoglyph `XXIΙ.rar`) instead of incorrectly skipping the later file.
+- Clearer log when a file downloads (HTTP 200) but **cannot be saved** to the final path (rename/move failure).
+
+### Notes
+- Steps 1–2 run as Bash scripts. On Windows, install **Git for Windows** (Git Bash). Perl is included with Git Bash (`usr/bin/perl`) and is used for filename homoglyph normalization; no separate Perl install is required.
+
 ## [1.5.0] — 2026-05-28
 
 ### Added

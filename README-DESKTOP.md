@@ -1,4 +1,4 @@
-# Bulk Downloader (Desktop v1.5.0)
+# Bulk Downloader (Desktop v1.5.1)
 
 Desktop app (Electron) + Bash/PowerShell scripts to bulk-download **your** MyMiniFactory library.
 
@@ -32,6 +32,24 @@ See also: [DESKTOP_EXE.md](DESKTOP_EXE.md) (build installer), [CHANGELOG.md](CHA
 
 - Primary: embedded browser + **Capture session** (encrypted storage when OS keychain is available).
 - Fallback: **Advanced → manual credentials** in the Configuration panel.
+
+## Windows dependencies (Steps 1–2)
+
+Steps 1 and 2 are **Bash scripts** (`.sh`). On Windows the desktop app runs them with **Git Bash** from [Git for Windows](https://git-scm.com/download/win). The startup dependency gate checks for Bash, `curl`, and `jq`.
+
+Git for Windows also ships **Perl** (`usr/bin/perl`). Step 2 uses it internally to normalize lookalike Unicode letters in MyMiniFactory filenames (e.g. Greek `Ι` → Latin `I` in Roman numerals). You do **not** need to install Perl separately.
+
+Steps 3–4 on Windows use **PowerShell** (`.ps1`); macOS/Linux use the `.sh` variants.
+
+## Troubleshooting Step 2 write errors
+
+If the log shows **“Could not write download to disk”** but free space looks fine (hundreds of GB), the drive is usually not full. Common causes:
+
+- Real-time antivirus or cloud sync (OneDrive, etc.) locking files during download
+- Output path too long — try a short folder such as `D:\MMF`
+- Read-only or permission-restricted destination
+
+Exclude the downloads folder from live scanning if possible, then re-run Step 2 (already-complete files are skipped).
 
 ## Scripts (CLI)
 

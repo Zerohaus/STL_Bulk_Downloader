@@ -6,13 +6,14 @@ This project includes an Electron desktop app that packages the existing scripts
 
 1. Opens a dependency gate before the main dashboard is usable.
 2. Checks for required tools:
-   - Bash (Git Bash)
+   - Bash (Git Bash on Windows)
    - curl
    - jq
-3. Checks optional tools:
+3. Uses Perl from the Git Bash install for Step 2 filename normalization (no separate Perl install; `usr/bin/perl` ships with Git for Windows).
+4. Checks optional tools:
    - PowerShell (Windows)
    - winget (Windows) / Homebrew (macOS)
-4. Lets the user choose:
+5. Lets the user choose:
    - Install missing dependencies (via winget on Windows, brew on macOS)
    - Continue without install
 
@@ -76,7 +77,7 @@ npm run dist:win
 
 Output installer path:
 
-- `dist\Bulk Downloader Setup 1.2.0.exe`
+- `dist\Bulk Downloader Setup 1.5.1.exe`
 
 ## Build macOS packages
 

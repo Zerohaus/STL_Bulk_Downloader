@@ -1,6 +1,6 @@
 # Bulk Downloader
 
-**Desktop v1.1** — see [README-DESKTOP.md](README-DESKTOP.md) for the current GUI workflow, [CHANGELOG.md](CHANGELOG.md) for release notes, [DESKTOP_EXE.md](DESKTOP_EXE.md) to build the installer.
+**Desktop v1.5.1** — see [README-DESKTOP.md](README-DESKTOP.md) for the current GUI workflow, [CHANGELOG.md](CHANGELOG.md) for release notes, [DESKTOP_EXE.md](DESKTOP_EXE.md) to build the installer.
 
 ---
 
