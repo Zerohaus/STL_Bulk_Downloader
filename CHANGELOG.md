@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.2] — 2026-09-09
+
+### Fixed
+- A Cloudflare **timed cooldown** (a rate-limit challenge page, HTTP 429/503, or a JS interstitial like "Just a moment...") was being misdiagnosed as a dead `cf_clearance` cookie: Step 1 and Step 2 would stop after a few failures and the desktop app would clear the saved session and ask you to sign in again — even though the same cookie worked again on its own minutes later, and hammering it with retries during the window only extended the cooldown.
+- Steps 1 and 2 now detect this specific condition and **wait it out** (5 → 10 → 15 → 20 minutes, escalating per consecutive hit within a run, reset to 5 minutes after the next successful download) before automatically retrying the same request, instead of counting it as a failure or stopping.
+- The desktop app's "session expired" detector no longer treats the word "Cloudflare" in run output as proof the session died — it only fires on unambiguous signals (missing `cf_clearance`, logged out, HTTP 401/403, etc.), so a cooldown wait is no longer mistaken for an expired session and no longer clears your saved cookie mid-run.
+- The pipeline progress panel now shows a "Waiting out Cloudflare cooldown" status with the remaining wait during this pause, so an unattended run doesn't look stuck.
+
 ## [1.5.1] — 2026-06-08
 
 ### Fixed

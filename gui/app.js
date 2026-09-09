@@ -1292,6 +1292,19 @@ function handlePipelineProgressEvent(event) {
         return true;
     }
 
+    if (step === "cloudflare_cooldown") {
+        pipelineProgressState.visible = true;
+        if (eventName === "waiting") {
+            const minutes = coerceProgressInteger(event.minutes, 5);
+            pipelineProgressState.label = "Waiting out Cloudflare cooldown";
+            pipelineProgressState.detail = `Cloudflare issued a timed cooldown (not an expired cookie) — waiting ${minutes} minute(s) before retrying automatically. No action needed.`;
+        } else if (eventName === "resumed") {
+            pipelineProgressState.detail = "Cloudflare cooldown wait finished. Resuming downloads...";
+        }
+        renderPipelineProgressUi();
+        return true;
+    }
+
     if (step === "test") {
         pipelineProgressState.visible = true;
         pipelineProgressState.phase = "step2-test";

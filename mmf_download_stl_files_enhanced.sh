@@ -72,6 +72,12 @@ ZIP64_RETRY_BYTES=3500000000
 CURL_RETRIES="${MMF_CURL_RETRIES:-2}"
 MODEL_IDS_FILTER_RAW="${MMF_MODEL_IDS_FILTER:-}"
 
+# Escalating wait (minutes) when a Cloudflare timed cooldown/challenge is detected.
+# This is a rate-limit window, not a dead cookie: the same cf_clearance keeps
+# working once the window passes, and retrying inside the window only extends it.
+CLOUDFLARE_COOLDOWN_STEPS_MIN=(5 10 15 20)
+CLOUDFLARE_COOLDOWN_STAGE=0
+
 DOWNLOAD_LAST_CURL_EXIT=0
 DOWNLOAD_LAST_HTTP_CODE=""
 DOWNLOAD_LAST_TMP_FILE=""
@@ -327,6 +333,75 @@ show_error_content() {
     local file="$1"
     echo -e "${CYAN}Error page content (first 20 lines):${NC}"
     head -20 "$file" | sed 's/^/  /'
+}
+
+# A Cloudflare interstitial ("Just a moment...", managed/JS challenge) is a timed
+# cooldown, not a dead session: the same cf_clearance cookie starts working again
+# on its own once the window passes. Distinguish it from a real expired-cookie or
+# logged-out page so it can be waited out instead of treated as a fatal failure.
+is_cloudflare_cooldown_page() {
+    local file="$1"
+
+    if [[ ! -f "$file" ]] || [[ ! -s "$file" ]]; then
+        return 1
+    fi
+
+    if head -60 "$file" | grep -qiE "just a moment|checking your browser|cf-chl|cf_chl_opt|cf-browser-verification|challenge-platform|__cf_chl_rt_tk|verifying you are human|cf-please-wait"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# True when the most recent download_file_with_guards call failed in a way that
+# looks like a Cloudflare timed cooldown rather than an expired cookie: HTTP 429
+# ("Too Many Requests") / 503 ("Service Unavailable"), or an interstitial page.
+is_cloudflare_cooldown_failure() {
+    if [[ "$DOWNLOAD_LAST_HTTP_CODE" == "429" ]] || [[ "$DOWNLOAD_LAST_HTTP_CODE" == "503" ]]; then
+        return 0
+    fi
+
+    if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]] && is_cloudflare_cooldown_page "$DOWNLOAD_LAST_TMP_FILE"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Waits out a detected Cloudflare cooldown instead of treating it as a fatal
+# session failure. Escalates 5 -> 10 -> 15 -> 20 minutes across consecutive
+# cooldown hits within a run, then holds at 20 minutes; resets to 5 minutes the
+# next time a download actually succeeds.
+wait_out_cloudflare_cooldown() {
+    local context="$1"
+    local max_index=$((${#CLOUDFLARE_COOLDOWN_STEPS_MIN[@]} - 1))
+    local stage_index=$CLOUDFLARE_COOLDOWN_STAGE
+
+    if [[ $stage_index -gt $max_index ]]; then
+        stage_index=$max_index
+    fi
+
+    local wait_min="${CLOUDFLARE_COOLDOWN_STEPS_MIN[$stage_index]}"
+    local wait_sec=$((wait_min * 60))
+
+    echo ""
+    echo -e "${YELLOW}=======================================================${NC}"
+    echo -e "${YELLOW}Cloudflare cooldown detected while ${context}${NC}"
+    echo -e "${YELLOW}This is a timed rate limit, not an expired cookie — the${NC}"
+    echo -e "${YELLOW}same cookie should work again once the wait is over.${NC}"
+    echo -e "${YELLOW}Retrying immediately would only extend the cooldown, so${NC}"
+    echo -e "${YELLOW}waiting ${wait_min} minute(s) before trying again...${NC}"
+    echo -e "${YELLOW}=======================================================${NC}"
+    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"waiting\",\"minutes\":${wait_min}}"
+
+    sleep "$wait_sec"
+
+    if [[ $CLOUDFLARE_COOLDOWN_STAGE -lt $max_index ]]; then
+        CLOUDFLARE_COOLDOWN_STAGE=$((CLOUDFLARE_COOLDOWN_STAGE + 1))
+    fi
+
+    echo -e "${CYAN}Resuming after Cloudflare cooldown wait.${NC}"
+    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"resumed\"}"
 }
 
 get_file_size() {
@@ -955,8 +1030,15 @@ download_file_with_guards() {
     fi
 
     if [[ ! "$DOWNLOAD_LAST_HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
-        rm -f "$tmp_path"
-        DOWNLOAD_LAST_TMP_FILE=""
+        # Keep the response body for 429/503/403: those are the codes Cloudflare's
+        # timed cooldown/challenge can use, and the caller needs the body to tell
+        # a cooldown apart from a genuinely dead cookie instead of treating it as
+        # fatal outright. A 403 without cooldown markers still falls through to
+        # the normal failure handling further up the call chain.
+        if [[ "$DOWNLOAD_LAST_HTTP_CODE" != "429" ]] && [[ "$DOWNLOAD_LAST_HTTP_CODE" != "503" ]] && [[ "$DOWNLOAD_LAST_HTTP_CODE" != "403" ]]; then
+            rm -f "$tmp_path"
+            DOWNLOAD_LAST_TMP_FILE=""
+        fi
         return 22
     fi
 
@@ -979,6 +1061,7 @@ download_file_with_guards() {
     fi
 
     DOWNLOAD_LAST_TMP_FILE=""
+    CLOUDFLARE_COOLDOWN_STAGE=0
     return 0
 }
 
@@ -1906,13 +1989,16 @@ download_model_images() {
 
         echo -e "  ${YELLOW}Downloading image: $(basename "$output_path")${NC}"
 
-        if download_file_with_guards "$image_url" "$output_path" "image/*,*/*;q=0.8" "downloading image $(basename "$output_path")" "$(basename "$output_path")"; then
-            local image_size
-            image_size=$(get_file_size "$output_path")
-            echo -e "  ${GREEN}[OK] Downloaded image $(basename "$output_path") (${image_size} bytes)${NC}"
-            successful_downloads=$((successful_downloads + 1))
-            emit_asset_progress_unit "$model_id" "image" "downloaded"
-        else
+        while true; do
+            if download_file_with_guards "$image_url" "$output_path" "image/*,*/*;q=0.8" "downloading image $(basename "$output_path")" "$(basename "$output_path")"; then
+                local image_size
+                image_size=$(get_file_size "$output_path")
+                echo -e "  ${GREEN}[OK] Downloaded image $(basename "$output_path") (${image_size} bytes)${NC}"
+                successful_downloads=$((successful_downloads + 1))
+                emit_asset_progress_unit "$model_id" "image" "downloaded"
+                break
+            fi
+
             if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                 rm -f "$output_path" "${output_path}.part"
                 emit_asset_progress_unit "$model_id" "image" "failed"
@@ -1923,6 +2009,12 @@ download_model_images() {
                 consecutive_failures=$((consecutive_failures + 1))
                 rm -f "$output_path" "${output_path}.part"
                 emit_asset_progress_unit "$model_id" "image" "failed"
+                continue 2
+            fi
+
+            if is_cloudflare_cooldown_failure; then
+                rm -f "$DOWNLOAD_LAST_TMP_FILE"
+                wait_out_cloudflare_cooldown "downloading image $(basename "$output_path")"
                 continue
             fi
 
@@ -1939,7 +2031,8 @@ download_model_images() {
 
             rm -f "$output_path"
             emit_asset_progress_unit "$model_id" "image" "failed"
-        fi
+            break
+        done
 
         sleep "$IMAGE_DELAY_SEC"
     done <<< "$image_data"
@@ -2180,52 +2273,60 @@ if [[ "$TEST_MODE" == true ]]; then
 
             echo ""
 
-            if download_file_with_guards "$download_url" "$test_file" "application/octet-stream" "running test mode download" "$(basename "$test_file")"; then
-                file_size=$(get_file_size "$test_file")
-                echo -e "${GREEN}[OK] TEST PASSED${NC}"
-                echo -e "  Successfully downloaded ${CYAN}$filename${NC} (${file_size} bytes)"
-                echo "  File appears to be valid (not an error page)"
-                echo ""
-                echo -e "${GREEN}Cookie is working! You can now run the full download:${NC}"
-                echo "  bash $(basename "$0")"
-                rm -f "$test_file"
-                emit_progress_event "{\"step\":\"test\",\"event\":\"done\"}"
-                exit 0
-            fi
+            while true; do
+                if download_file_with_guards "$download_url" "$test_file" "application/octet-stream" "running test mode download" "$(basename "$test_file")"; then
+                    file_size=$(get_file_size "$test_file")
+                    echo -e "${GREEN}[OK] TEST PASSED${NC}"
+                    echo -e "  Successfully downloaded ${CYAN}$filename${NC} (${file_size} bytes)"
+                    echo "  File appears to be valid (not an error page)"
+                    echo ""
+                    echo -e "${GREEN}Cookie is working! You can now run the full download:${NC}"
+                    echo "  bash $(basename "$0")"
+                    rm -f "$test_file"
+                    emit_progress_event "{\"step\":\"test\",\"event\":\"done\"}"
+                    exit 0
+                fi
 
-            if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
-                rm -f "$test_file" "${test_file}.part"
+                if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
+                    rm -f "$test_file" "${test_file}.part"
+                    emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
+                    abort_write_failure "running test mode download" "$(dirname "$test_file")"
+                fi
+
+                if is_cloudflare_cooldown_failure; then
+                    rm -f "$test_file" "${test_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
+                    wait_out_cloudflare_cooldown "running test mode download"
+                    continue
+                fi
+
+                if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]] && is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
+                    echo -e "${RED}[FAIL] TEST FAILED${NC}"
+                    echo -e "${RED}Downloaded file is an HTML error page, not the actual file${NC}"
+                    echo ""
+                    show_error_content "$DOWNLOAD_LAST_TMP_FILE"
+                    echo ""
+                    echo -e "${YELLOW}Common causes:${NC}"
+                    echo "  1. Cookie expired - get a fresh cookie from browser"
+                    echo "  2. Missing cf_clearance token - copy cookie from download request, not page view"
+                    echo "  3. Not logged in - make sure you're logged into MyMiniFactory in browser"
+                    echo "  4. Cookie formatting error - check for extra quotes or special characters"
+                    echo ""
+                    echo -e "${CYAN}How to get a fresh cookie:${NC}"
+                    echo "  1. Open MyMiniFactory in browser, log in"
+                    echo "  2. Download any file from any model"
+                    echo "  3. F12 -> Network -> Find 'download' request"
+                    echo "  4. Copy the Cookie header value"
+                    echo "  5. Paste into script (no extra quotes)"
+                else
+                    echo -e "${RED}[FAIL] TEST FAILED${NC}"
+                    echo -e "${RED}Download failed (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, HTTP ${DOWNLOAD_LAST_HTTP_CODE:-unknown})${NC}"
+                    echo "Check cookie validity and your network connection."
+                fi
+
+                rm -f "$test_file" "${test_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
                 emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
-                abort_write_failure "running test mode download" "$(dirname "$test_file")"
-            fi
-
-            if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]] && is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
-                echo -e "${RED}[FAIL] TEST FAILED${NC}"
-                echo -e "${RED}Downloaded file is an HTML error page, not the actual file${NC}"
-                echo ""
-                show_error_content "$DOWNLOAD_LAST_TMP_FILE"
-                echo ""
-                echo -e "${YELLOW}Common causes:${NC}"
-                echo "  1. Cookie expired - get a fresh cookie from browser"
-                echo "  2. Missing cf_clearance token - copy cookie from download request, not page view"
-                echo "  3. Not logged in - make sure you're logged into MyMiniFactory in browser"
-                echo "  4. Cookie formatting error - check for extra quotes or special characters"
-                echo ""
-                echo -e "${CYAN}How to get a fresh cookie:${NC}"
-                echo "  1. Open MyMiniFactory in browser, log in"
-                echo "  2. Download any file from any model"
-                echo "  3. F12 -> Network -> Find 'download' request"
-                echo "  4. Copy the Cookie header value"
-                echo "  5. Paste into script (no extra quotes)"
-            else
-                echo -e "${RED}[FAIL] TEST FAILED${NC}"
-                echo -e "${RED}Download failed (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, HTTP ${DOWNLOAD_LAST_HTTP_CODE:-unknown})${NC}"
-                echo "Check cookie validity and your network connection."
-            fi
-
-            rm -f "$test_file" "${test_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
-            emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
-            exit 1
+                exit 1
+            done
         else
             is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
             if [[ "$is_bought" == "false" ]]; then
@@ -2414,14 +2515,17 @@ for json_file in "${model_json_files[@]}"; do
 
             echo -e "  ${YELLOW}Downloading file: $(basename "$output_file")${NC}"
 
-            if download_file_with_guards "$download_url" "$output_file" "application/octet-stream" "downloading file $(basename "$output_file")" "$(basename "$output_file")"; then
-                file_size=$(get_file_size "$output_file")
-                echo -e "  ${GREEN}[OK] Downloaded $(basename "$output_file") (${file_size} bytes)${NC}"
-                successful_downloads=$((successful_downloads + 1))
-                model_file_successful_downloads=$((model_file_successful_downloads + 1))
-                consecutive_failures=0
-                emit_asset_progress_unit "$model_id" "file" "downloaded"
-            else
+            while true; do
+                if download_file_with_guards "$download_url" "$output_file" "application/octet-stream" "downloading file $(basename "$output_file")" "$(basename "$output_file")"; then
+                    file_size=$(get_file_size "$output_file")
+                    echo -e "  ${GREEN}[OK] Downloaded $(basename "$output_file") (${file_size} bytes)${NC}"
+                    successful_downloads=$((successful_downloads + 1))
+                    model_file_successful_downloads=$((model_file_successful_downloads + 1))
+                    consecutive_failures=0
+                    emit_asset_progress_unit "$model_id" "file" "downloaded"
+                    break
+                fi
+
                 if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                     rm -f "$output_file" "${output_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
                     emit_asset_progress_unit "$model_id" "file" "failed"
@@ -2443,6 +2547,12 @@ for json_file in "${model_json_files[@]}"; do
                     fi
 
                     sleep "$STL_FILE_DELAY_SEC"
+                    continue 2
+                fi
+
+                if is_cloudflare_cooldown_failure; then
+                    rm -f "$output_file" "${output_file}.part" "$DOWNLOAD_LAST_TMP_FILE"
+                    wait_out_cloudflare_cooldown "downloading file $(basename "$output_file")"
                     continue
                 fi
 
@@ -2488,7 +2598,9 @@ for json_file in "${model_json_files[@]}"; do
                     echo "  5. Run in test mode first: bash $(basename "$0") --test"
                     exit 1
                 fi
-            fi
+
+                break
+            done
 
             sleep "$STL_FILE_DELAY_SEC"
         done <<< "$download_data"

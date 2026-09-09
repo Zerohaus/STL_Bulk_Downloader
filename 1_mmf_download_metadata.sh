@@ -33,7 +33,6 @@ emit_progress_event() {
 # UPDATE THIS: Get your cookie from browser developer tools (F12 -> Network -> Copy Cookie header)
 COOKIE="${MMF_COOKIE:-REPLACE_WITH_YOUR_ACTUAL_COOKIE_STRING}"
 METADATA_DELAY_SEC="${MMF_METADATA_DELAY_SEC:-6}"
-METADATA_429_BACKOFF_SEC="${MMF_METADATA_429_BACKOFF_SEC:-45}"
 METADATA_MIN_FREE_MB="${MMF_METADATA_MIN_FREE_MB:-512}"
 METADATA_CURL_RETRIES="${MMF_METADATA_CURL_RETRIES:-2}"
 
@@ -45,6 +44,12 @@ JQ_CMD=""
 DOWNLOAD_HTTP_CODE=""
 DOWNLOAD_CURL_EXIT=0
 DISK_CHECK_WARNED=0
+
+# Escalating wait (minutes) when a Cloudflare timed cooldown/challenge is detected.
+# This is a rate-limit window, not a dead cookie: the same cf_clearance keeps
+# working once the window passes, and retrying inside the window only extends it.
+CLOUDFLARE_COOLDOWN_STEPS_MIN=(5 10 15 20)
+CLOUDFLARE_COOLDOWN_STAGE=0
 
 if [[ ! "$METADATA_MIN_FREE_MB" =~ ^[0-9]+$ ]]; then
     METADATA_MIN_FREE_MB=512
@@ -145,6 +150,78 @@ file_looks_like_html_error() {
     fi
 
     return 1
+}
+
+# A Cloudflare interstitial ("Just a moment...", managed/JS challenge) is a timed
+# cooldown, not a dead session: the same cf_clearance cookie starts working again
+# on its own once the window passes. Distinguish it from a real expired-cookie or
+# logged-out page so it can be waited out instead of treated as a fatal failure.
+is_cloudflare_cooldown_page() {
+    local file="$1"
+
+    if [[ ! -f "$file" ]] || [[ ! -s "$file" ]]; then
+        return 1
+    fi
+
+    if head -60 "$file" | grep -qiE "just a moment|checking your browser|cf-chl|cf_chl_opt|cf-browser-verification|challenge-platform|__cf_chl_rt_tk|verifying you are human|cf-please-wait"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# True when a metadata download attempt failed in a way that looks like a
+# Cloudflare timed cooldown rather than an expired cookie: HTTP 429 ("Too Many
+# Requests") / 503 ("Service Unavailable"), or an interstitial challenge page.
+is_cloudflare_cooldown_failure() {
+    local http_code="$1"
+    local file="$2"
+
+    if [[ "$http_code" == "429" ]] || [[ "$http_code" == "503" ]]; then
+        return 0
+    fi
+
+    if [[ -f "$file" ]] && is_cloudflare_cooldown_page "$file"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Waits out a detected Cloudflare cooldown instead of treating it as a fatal
+# session failure. Escalates 5 -> 10 -> 15 -> 20 minutes across consecutive
+# cooldown hits within a run, then holds at 20 minutes; resets to 5 minutes the
+# next time a download actually succeeds.
+wait_out_cloudflare_cooldown() {
+    local context="$1"
+    local max_index=$((${#CLOUDFLARE_COOLDOWN_STEPS_MIN[@]} - 1))
+    local stage_index=$CLOUDFLARE_COOLDOWN_STAGE
+
+    if [[ $stage_index -gt $max_index ]]; then
+        stage_index=$max_index
+    fi
+
+    local wait_min="${CLOUDFLARE_COOLDOWN_STEPS_MIN[$stage_index]}"
+    local wait_sec=$((wait_min * 60))
+
+    echo ""
+    echo -e "${YELLOW}=======================================================${NC}"
+    echo -e "${YELLOW}Cloudflare cooldown detected while ${context}${NC}"
+    echo -e "${YELLOW}This is a timed rate limit, not an expired cookie — the${NC}"
+    echo -e "${YELLOW}same cookie should work again once the wait is over.${NC}"
+    echo -e "${YELLOW}Retrying immediately would only extend the cooldown, so${NC}"
+    echo -e "${YELLOW}waiting ${wait_min} minute(s) before trying again...${NC}"
+    echo -e "${YELLOW}=======================================================${NC}"
+    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"waiting\",\"minutes\":${wait_min}}"
+
+    sleep "$wait_sec"
+
+    if [[ $CLOUDFLARE_COOLDOWN_STAGE -lt $max_index ]]; then
+        CLOUDFLARE_COOLDOWN_STAGE=$((CLOUDFLARE_COOLDOWN_STAGE + 1))
+    fi
+
+    echo -e "${CYAN}Resuming after Cloudflare cooldown wait.${NC}"
+    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"resumed\"}"
 }
 
 is_valid_metadata_json() {
@@ -293,19 +370,14 @@ while read -r id; do
 
     echo -e "${BLUE}[$current/$total] Downloading metadata for model $id...${NC}"
 
-    attempt=1
-    max_attempts=2
-
     while true; do
         download_metadata_once "$id" "$final_file"
         curl_exit="$DOWNLOAD_CURL_EXIT"
         http_code="$DOWNLOAD_HTTP_CODE"
 
-        if [[ "$http_code" == "429" ]] && [[ "$attempt" -lt "$max_attempts" ]]; then
-            echo -e "${YELLOW}Rate limited (HTTP 429). Backing off ${METADATA_429_BACKOFF_SEC}s and retrying once...${NC}"
+        if [[ "$curl_exit" -eq 0 ]] && is_cloudflare_cooldown_failure "$http_code" "$tmp_file"; then
             rm -f "$tmp_file"
-            sleep "$METADATA_429_BACKOFF_SEC"
-            attempt=$((attempt + 1))
+            wait_out_cloudflare_cooldown "downloading metadata for model $id"
             continue
         fi
 
@@ -335,6 +407,7 @@ while read -r id; do
         abort_no_space "saving metadata file for model $id"
     else
         echo -e "${GREEN}Successfully downloaded metadata for model $id${NC}"
+        CLOUDFLARE_COOLDOWN_STAGE=0
         emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"downloaded\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     fi
     
