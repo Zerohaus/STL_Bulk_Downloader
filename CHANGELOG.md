@@ -7,6 +7,7 @@
 - Steps 1 and 2 now detect this specific condition and **wait it out** (5 → 10 → 15 → 20 minutes, escalating per consecutive hit within a run, reset to 5 minutes after the next successful download) before automatically retrying the same request, instead of counting it as a failure or stopping.
 - The desktop app's "session expired" detector no longer treats the word "Cloudflare" in run output as proof the session died — it only fires on unambiguous signals (missing `cf_clearance`, logged out, HTTP 401/403, etc.), so a cooldown wait is no longer mistaken for an expired session and no longer clears your saved cookie mid-run.
 - The pipeline progress panel now shows a "Waiting out Cloudflare cooldown" status with the remaining wait during this pause, so an unattended run doesn't look stuck.
+- `curl`'s own `--retry` (default 2, ~2s apart) was silently re-hitting the server on HTTP 429/503 before the new cooldown handling above ever saw the failure — itself the kind of rapid retry that extends a cooldown. `MMF_CURL_RETRIES` / `MMF_METADATA_CURL_RETRIES` now default to 0 so the cooldown wait is what actually runs; override those env vars if you want `curl` to also retry plain transient network errors.
 
 ## [1.5.1] — 2026-06-08
 

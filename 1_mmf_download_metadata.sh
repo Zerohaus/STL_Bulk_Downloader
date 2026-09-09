@@ -34,7 +34,15 @@ emit_progress_event() {
 COOKIE="${MMF_COOKIE:-REPLACE_WITH_YOUR_ACTUAL_COOKIE_STRING}"
 METADATA_DELAY_SEC="${MMF_METADATA_DELAY_SEC:-6}"
 METADATA_MIN_FREE_MB="${MMF_METADATA_MIN_FREE_MB:-512}"
-METADATA_CURL_RETRIES="${MMF_METADATA_CURL_RETRIES:-2}"
+# curl's own --retry treats HTTP 429/500/502/503/504 as transient and retries
+# them itself (2s delay by default) before this script ever sees the failure.
+# That silently re-hits the server 3x in a few seconds on a Cloudflare cooldown
+# -- the exact rapid-retry behavior that extends the cooldown window. The
+# script-level Cloudflare cooldown handling (see wait_out_cloudflare_cooldown)
+# is the intended retry/backoff for that case now, so curl-level retries
+# default to off; override via MMF_METADATA_CURL_RETRIES if you want curl to
+# also retry on plain transient network errors.
+METADATA_CURL_RETRIES="${MMF_METADATA_CURL_RETRIES:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_IDS_FILE="${MMF_MODEL_IDS_PATH:-${SCRIPT_DIR}/model_ids.txt}"

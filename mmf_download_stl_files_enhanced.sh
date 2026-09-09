@@ -69,7 +69,15 @@ DISK_MARGIN_MB_PER_FILE="${MMF_DISK_MARGIN_MB_PER_FILE:-512}"
 DISK_MARGIN_MB_MODEL="${MMF_DISK_MARGIN_MB_MODEL:-1024}"
 ZIP32_LIMIT_BYTES=4294967295
 ZIP64_RETRY_BYTES=3500000000
-CURL_RETRIES="${MMF_CURL_RETRIES:-2}"
+# curl's own --retry treats HTTP 429/500/502/503/504 as transient and retries
+# them itself (2s delay by default) before this script ever sees the failure.
+# That silently re-hits the server 3x in a few seconds on a Cloudflare cooldown
+# -- the exact rapid-retry behavior that extends the cooldown window. The
+# script-level Cloudflare cooldown handling (see wait_out_cloudflare_cooldown)
+# is the intended retry/backoff for that case now, so curl-level retries
+# default to off; override via MMF_CURL_RETRIES if you want curl to also
+# retry on plain transient network errors.
+CURL_RETRIES="${MMF_CURL_RETRIES:-0}"
 MODEL_IDS_FILTER_RAW="${MMF_MODEL_IDS_FILTER:-}"
 
 # Escalating wait (minutes) when a Cloudflare timed cooldown/challenge is detected.
