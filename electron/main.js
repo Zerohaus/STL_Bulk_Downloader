@@ -534,12 +534,14 @@ function looksLikeCookieExpiration(text) {
 
     const normalized = text.toLowerCase();
 
-    // A Cloudflare timed cooldown (rate-limit challenge) is not a dead session —
-    // the workflow scripts wait it out and log it explicitly. Don't let that log
+    // A Cloudflare challenge cooldown or MyMiniFactory's own app-level throttle
+    // are timed rate limits, not a dead session — the workflow scripts wait them
+    // out and log it explicitly with this exact phrase (see
+    // wait_out_cloudflare_cooldown / wait_out_app_throttle). Don't let that log
     // line (or the word "cloudflare" on its own, which also appears in benign
     // Cloudflare-branded pages) be mistaken for an expired cookie and wipe a
     // perfectly good saved session out from under an unattended run.
-    if (normalized.includes("cloudflare cooldown")) {
+    if (normalized.includes("not an expired cookie")) {
         return false;
     }
 

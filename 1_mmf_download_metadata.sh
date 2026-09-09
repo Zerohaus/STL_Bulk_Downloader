@@ -52,12 +52,28 @@ JQ_CMD=""
 DOWNLOAD_HTTP_CODE=""
 DOWNLOAD_CURL_EXIT=0
 DISK_CHECK_WARNED=0
+DOWNLOAD_CF_MITIGATED=""
 
-# Escalating wait (minutes) when a Cloudflare timed cooldown/challenge is detected.
-# This is a rate-limit window, not a dead cookie: the same cf_clearance keeps
-# working once the window passes, and retrying inside the window only extends it.
-CLOUDFLARE_COOLDOWN_STEPS_MIN=(5 10 15 20)
+# Two distinct transient conditions get mistaken for a dead cookie if lumped
+# together, and only the `cf-mitigated` response header reliably tells them
+# apart (see _tools/MMF_DOWNLOADER_FINDINGS.md):
+#   - A real Cloudflare edge challenge (`cf-mitigated: challenge`) is a long
+#     cooldown; the same cf_clearance works again once it passes.
+#   - MyMiniFactory's own app-level throttle (403/429/503 with NO cf-mitigated
+#     header) is a separate, shorter-lived condition -- also self-healing, not
+#     a credential problem, but retrying it fast is what escalates into a real
+#     Cloudflare lockout.
+# Both wait it out with an escalating ladder instead of counting as a failure.
+CLOUDFLARE_COOLDOWN_STEPS_MIN=(30 45 60)
 CLOUDFLARE_COOLDOWN_STAGE=0
+APP_THROTTLE_STEPS_MIN=(5 10 15)
+APP_THROTTLE_STAGE=0
+# Unlike a domain-wide Cloudflare challenge, an app-throttle 403 can also mean
+# "you genuinely don't have access to this one model" rather than a rate
+# limit. Cap how many times a single model waits it out before falling through
+# to the normal failure path, so a permanently-forbidden model can't retry
+# forever.
+MAX_APP_THROTTLE_ATTEMPTS_PER_ITEM=6
 
 if [[ ! "$METADATA_MIN_FREE_MB" =~ ^[0-9]+$ ]]; then
     METADATA_MIN_FREE_MB=512
@@ -178,14 +194,16 @@ is_cloudflare_cooldown_page() {
     return 1
 }
 
-# True when a metadata download attempt failed in a way that looks like a
-# Cloudflare timed cooldown rather than an expired cookie: HTTP 429 ("Too Many
-# Requests") / 503 ("Service Unavailable"), or an interstitial challenge page.
-is_cloudflare_cooldown_failure() {
+# True when a metadata download attempt hit a real Cloudflare edge challenge
+# rather than an expired cookie. The `cf-mitigated` response header is the
+# reliable signal (see _tools/MMF_DOWNLOADER_FINDINGS.md); the interstitial-page
+# content check is a fallback for when the header wasn't captured.
+is_cloudflare_challenge_failure() {
     local http_code="$1"
     local file="$2"
+    local cf_mitigated="$3"
 
-    if [[ "$http_code" == "429" ]] || [[ "$http_code" == "503" ]]; then
+    if [[ "$cf_mitigated" == *[Cc]hallenge* ]]; then
         return 0
     fi
 
@@ -196,10 +214,30 @@ is_cloudflare_cooldown_failure() {
     return 1
 }
 
-# Waits out a detected Cloudflare cooldown instead of treating it as a fatal
-# session failure. Escalates 5 -> 10 -> 15 -> 20 minutes across consecutive
-# cooldown hits within a run, then holds at 20 minutes; resets to 5 minutes the
-# next time a download actually succeeds.
+# True when a metadata download attempt hit MyMiniFactory's own app-level
+# throttle: HTTP 403/429/503 with NO cf-mitigated header (so it's not
+# Cloudflare stepping in). Also transient/self-healing, not a credential
+# problem, but it wants a shorter quiet period than a real Cloudflare challenge.
+is_app_throttle_failure() {
+    local http_code="$1"
+    local file="$2"
+    local cf_mitigated="$3"
+
+    case "$http_code" in
+        403|429|503) ;;
+        *) return 1 ;;
+    esac
+
+    if is_cloudflare_challenge_failure "$http_code" "$file" "$cf_mitigated"; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Waits out a real Cloudflare edge challenge. Escalates 30 -> 45 -> 60 minutes
+# across consecutive hits within a run, then holds at 60; resets the next time
+# a download actually succeeds.
 wait_out_cloudflare_cooldown() {
     local context="$1"
     local max_index=$((${#CLOUDFLARE_COOLDOWN_STEPS_MIN[@]} - 1))
@@ -214,13 +252,13 @@ wait_out_cloudflare_cooldown() {
 
     echo ""
     echo -e "${YELLOW}=======================================================${NC}"
-    echo -e "${YELLOW}Cloudflare cooldown detected while ${context}${NC}"
+    echo -e "${YELLOW}Cloudflare challenge cooldown detected while ${context}${NC}"
     echo -e "${YELLOW}This is a timed rate limit, not an expired cookie — the${NC}"
     echo -e "${YELLOW}same cookie should work again once the wait is over.${NC}"
     echo -e "${YELLOW}Retrying immediately would only extend the cooldown, so${NC}"
     echo -e "${YELLOW}waiting ${wait_min} minute(s) before trying again...${NC}"
     echo -e "${YELLOW}=======================================================${NC}"
-    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"waiting\",\"minutes\":${wait_min}}"
+    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"waiting\",\"minutes\":${wait_min},\"kind\":\"cloudflare\"}"
 
     sleep "$wait_sec"
 
@@ -228,8 +266,43 @@ wait_out_cloudflare_cooldown() {
         CLOUDFLARE_COOLDOWN_STAGE=$((CLOUDFLARE_COOLDOWN_STAGE + 1))
     fi
 
-    echo -e "${CYAN}Resuming after Cloudflare cooldown wait.${NC}"
-    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"resumed\"}"
+    echo -e "${CYAN}Resuming after Cloudflare challenge cooldown wait.${NC}"
+    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"resumed\",\"kind\":\"cloudflare\"}"
+}
+
+# Waits out MyMiniFactory's own app-level throttle (no Cloudflare challenge
+# involved). Escalates 5 -> 10 -> 15 minutes, then holds at 15; resets the next
+# time a download actually succeeds.
+wait_out_app_throttle() {
+    local context="$1"
+    local max_index=$((${#APP_THROTTLE_STEPS_MIN[@]} - 1))
+    local stage_index=$APP_THROTTLE_STAGE
+
+    if [[ $stage_index -gt $max_index ]]; then
+        stage_index=$max_index
+    fi
+
+    local wait_min="${APP_THROTTLE_STEPS_MIN[$stage_index]}"
+    local wait_sec=$((wait_min * 60))
+
+    echo ""
+    echo -e "${YELLOW}=======================================================${NC}"
+    echo -e "${YELLOW}App-level throttle detected while ${context}${NC}"
+    echo -e "${YELLOW}This is a timed rate limit, not an expired cookie — the${NC}"
+    echo -e "${YELLOW}same cookie should work again once the wait is over.${NC}"
+    echo -e "${YELLOW}Retrying immediately would only extend the cooldown, so${NC}"
+    echo -e "${YELLOW}waiting ${wait_min} minute(s) before trying again...${NC}"
+    echo -e "${YELLOW}=======================================================${NC}"
+    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"waiting\",\"minutes\":${wait_min},\"kind\":\"app_throttle\"}"
+
+    sleep "$wait_sec"
+
+    if [[ $APP_THROTTLE_STAGE -lt $max_index ]]; then
+        APP_THROTTLE_STAGE=$((APP_THROTTLE_STAGE + 1))
+    fi
+
+    echo -e "${CYAN}Resuming after app-level throttle wait.${NC}"
+    emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"resumed\",\"kind\":\"app_throttle\"}"
 }
 
 is_valid_metadata_json() {
@@ -261,10 +334,12 @@ download_metadata_once() {
     local model_id="$1"
     local output_file="$2"
     local tmp_file="${output_file}.part"
+    local headers_file="${output_file}.headers"
 
-    rm -f "$tmp_file"
+    rm -f "$tmp_file" "$headers_file"
     DOWNLOAD_HTTP_CODE=""
     DOWNLOAD_CURL_EXIT=0
+    DOWNLOAD_CF_MITIGATED=""
 
     DOWNLOAD_HTTP_CODE="$(curl --silent --show-error \
         -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0" \
@@ -281,10 +356,19 @@ download_metadata_once() {
         --compressed \
         --retry "$METADATA_CURL_RETRIES" \
         --retry-delay 2 \
+        -D "$headers_file" \
         -w "%{http_code}" \
         "https://www.myminifactory.com/api/v2/objects/$model_id" \
         -o "$tmp_file")"
     DOWNLOAD_CURL_EXIT=$?
+
+    # cf-mitigated is the only reliable signal that Cloudflare (not MyMiniFactory's
+    # own app-level throttle) issued this response. -L is not used here, so the
+    # header dump is just the one response's headers.
+    if [[ -f "$headers_file" ]]; then
+        DOWNLOAD_CF_MITIGATED="$(grep -i '^cf-mitigated:' "$headers_file" | tail -1 | cut -d':' -f2- | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        rm -f "$headers_file"
+    fi
 }
 
 cleanup_orphan_metadata_parts() {
@@ -378,14 +462,22 @@ while read -r id; do
 
     echo -e "${BLUE}[$current/$total] Downloading metadata for model $id...${NC}"
 
+    app_throttle_attempts=0
     while true; do
         download_metadata_once "$id" "$final_file"
         curl_exit="$DOWNLOAD_CURL_EXIT"
         http_code="$DOWNLOAD_HTTP_CODE"
 
-        if [[ "$curl_exit" -eq 0 ]] && is_cloudflare_cooldown_failure "$http_code" "$tmp_file"; then
+        if [[ "$curl_exit" -eq 0 ]] && is_cloudflare_challenge_failure "$http_code" "$tmp_file" "$DOWNLOAD_CF_MITIGATED"; then
             rm -f "$tmp_file"
             wait_out_cloudflare_cooldown "downloading metadata for model $id"
+            continue
+        fi
+
+        if [[ "$curl_exit" -eq 0 ]] && [[ $app_throttle_attempts -lt $MAX_APP_THROTTLE_ATTEMPTS_PER_ITEM ]] && is_app_throttle_failure "$http_code" "$tmp_file" "$DOWNLOAD_CF_MITIGATED"; then
+            app_throttle_attempts=$((app_throttle_attempts + 1))
+            rm -f "$tmp_file"
+            wait_out_app_throttle "downloading metadata for model $id"
             continue
         fi
 
@@ -416,6 +508,7 @@ while read -r id; do
     else
         echo -e "${GREEN}Successfully downloaded metadata for model $id${NC}"
         CLOUDFLARE_COOLDOWN_STAGE=0
+        APP_THROTTLE_STAGE=0
         emit_progress_event "{\"step\":\"metadata\",\"event\":\"item\",\"status\":\"downloaded\",\"modelId\":\"$id\",\"current\":$current,\"total\":$total}"
     fi
     

@@ -4,10 +4,15 @@
 
 ### Fixed
 - A Cloudflare **timed cooldown** (a rate-limit challenge page, HTTP 429/503, or a JS interstitial like "Just a moment...") was being misdiagnosed as a dead `cf_clearance` cookie: Step 1 and Step 2 would stop after a few failures and the desktop app would clear the saved session and ask you to sign in again — even though the same cookie worked again on its own minutes later, and hammering it with retries during the window only extended the cooldown.
-- Steps 1 and 2 now detect this specific condition and **wait it out** (5 → 10 → 15 → 20 minutes, escalating per consecutive hit within a run, reset to 5 minutes after the next successful download) before automatically retrying the same request, instead of counting it as a failure or stopping.
+- Steps 1 and 2 now distinguish **two** transient conditions that both look like a dead cookie but aren't, using the `cf-mitigated` response header as the authoritative signal (body-content sniffing as a fallback):
+  - A real **Cloudflare edge challenge** (`cf-mitigated: challenge`) — waited out with an escalating 30 → 45 → 60 minute ladder.
+  - MyMiniFactory's own **app-level throttle** (403/429/503 with no `cf-mitigated` header) — a separate, shorter condition, waited out with a 5 → 10 → 15 minute ladder. Retrying it quickly is what was escalating runs into a real Cloudflare lockout.
+  Both reset their ladder after the next successful download. An app-throttle wait is capped at 6 attempts per item so a *genuinely* forbidden file (not a rate limit) still fails normally instead of retrying forever.
 - The desktop app's "session expired" detector no longer treats the word "Cloudflare" in run output as proof the session died — it only fires on unambiguous signals (missing `cf_clearance`, logged out, HTTP 401/403, etc.), so a cooldown wait is no longer mistaken for an expired session and no longer clears your saved cookie mid-run.
-- The pipeline progress panel now shows a "Waiting out Cloudflare cooldown" status with the remaining wait during this pause, so an unattended run doesn't look stuck.
-- `curl`'s own `--retry` (default 2, ~2s apart) was silently re-hitting the server on HTTP 429/503 before the new cooldown handling above ever saw the failure — itself the kind of rapid retry that extends a cooldown. `MMF_CURL_RETRIES` / `MMF_METADATA_CURL_RETRIES` now default to 0 so the cooldown wait is what actually runs; override those env vars if you want `curl` to also retry plain transient network errors.
+- The pipeline progress panel now shows which kind of cooldown is being waited out ("Waiting out Cloudflare cooldown" vs. "Waiting out app-level throttle") with the remaining wait, so an unattended run doesn't look stuck.
+- `curl`'s own `--retry` (default 2, ~2s apart) was silently re-hitting the server on HTTP 429/503 before the cooldown handling above ever saw the failure — itself the kind of rapid retry that extends a cooldown. `MMF_CURL_RETRIES` / `MMF_METADATA_CURL_RETRIES` now default to 0 so the cooldown wait is what actually runs; override those env vars if you want `curl` to also retry plain transient network errors.
+
+See `_tools/MMF_DOWNLOADER_FINDINGS.md` for the real-world run that informed this design.
 
 ## [1.5.1] — 2026-06-08
 

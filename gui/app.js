@@ -1294,12 +1294,14 @@ function handlePipelineProgressEvent(event) {
 
     if (step === "cloudflare_cooldown") {
         pipelineProgressState.visible = true;
+        const isAppThrottle = event.kind === "app_throttle";
+        const kindLabel = isAppThrottle ? "app-level throttle" : "Cloudflare challenge";
         if (eventName === "waiting") {
             const minutes = coerceProgressInteger(event.minutes, 5);
-            pipelineProgressState.label = "Waiting out Cloudflare cooldown";
-            pipelineProgressState.detail = `Cloudflare issued a timed cooldown (not an expired cookie) — waiting ${minutes} minute(s) before retrying automatically. No action needed.`;
+            pipelineProgressState.label = isAppThrottle ? "Waiting out app-level throttle" : "Waiting out Cloudflare cooldown";
+            pipelineProgressState.detail = `MyMiniFactory issued a timed ${kindLabel} cooldown (not an expired cookie) — waiting ${minutes} minute(s) before retrying automatically. No action needed.`;
         } else if (eventName === "resumed") {
-            pipelineProgressState.detail = "Cloudflare cooldown wait finished. Resuming downloads...";
+            pipelineProgressState.detail = `${isAppThrottle ? "App-level throttle" : "Cloudflare cooldown"} wait finished. Resuming downloads...`;
         }
         renderPipelineProgressUi();
         return true;
