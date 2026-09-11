@@ -1923,8 +1923,21 @@ expand_zip_into_payload() {
     # The target layout is flat, so nested directory structure is discarded and
     # only the leaf names survive (sanitised, and de-duplicated on collision).
     while IFS= read -r -d '' member_path; do
-        member_name="$(basename "$member_path")"
-        lower_name="$(printf '%s' "$member_name" | tr '[:upper:]' '[:lower:]')"
+        member_name="${member_path##*/}"
+        lower_name="${member_name,,}"
+
+        # Creators who zip on macOS ship a parallel __MACOSX tree of AppleDouble
+        # resource forks alongside the real files. Flattening strips the leading
+        # "._", which then collides with the real name, so a 178-byte metadata
+        # blob gets stored next to the model as <name>_1.stl and looks like a
+        # legitimate file. Nested structure used to hide this; a flat archive
+        # cannot, so drop the junk instead.
+        if [[ "$member_path" == *"/__MACOSX/"* ]] || [[ "$member_name" == ._* ]]; then
+            continue
+        fi
+        case "$lower_name" in
+            .ds_store|thumbs.db|desktop.ini) continue ;;
+        esac
 
         if [[ "$lower_name" == *.zip ]]; then
             expand_zip_into_payload "$member_path" "$dest_dir" "$((depth + 1))" || {
