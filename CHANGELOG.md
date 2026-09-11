@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.1] — 2026-09-11
+
+### Fixed
+- The pre-download scan that sizes the progress bar ran **silently for
+  minutes** and looked like a freeze — over two and a half minutes on a
+  135-model library with 10 already downloaded, growing worse as the library
+  grows. It now announces itself, reports every 25 models, and is **7×
+  faster** (153.4 s → 21.9 s), producing an identical work estimate.
+  - The scan made roughly five `jq` calls per model, and `jq` costs ~88 ms to
+    start on Windows. It now makes **one** pass over every metadata file
+    (282 ms) and threads the results through.
+  - It ran a full CRC verification of every archive already on disk purely to
+    estimate work — 1,073 MiB of reads, 16.9 s. It now checks the ZIP
+    signature instead (56 ms). The main loop still verifies properly before
+    skipping any model, so an optimistic estimate can never skip a download.
+  - Dropped a redundant HTML-error sniff (two process spawns per archive) and a
+    subshell per model that only trimmed whitespace.
+- The leftover-file sweep now removes `.headers` files as well as `.part`
+  files. A hard kill (Stop in the desktop app) skips the cleanup handler and
+  leaves both behind.
+
 ## [2.0.0] — 2026-09-11
 
 Applies the findings from two full-library pulls (413 models, 175 GB, zero failed
