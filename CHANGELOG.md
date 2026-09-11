@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.3] — 2026-09-11
+
+### Fixed
+- A model whose name matches its single declared file (e.g. *Nebula Starter
+  Set* shipping `Nebula Starter Set.zip`) had its **downloaded source mistaken
+  for a finished archive**, so packaging was skipped and the creator's raw zip
+  was left in place — nested, names unsanitised, `__MACOSX` junk intact. 2 of
+  135 models in a real library were affected. Completion is now decided by the
+  archive's structure (flat, sanitised members) rather than its name, and a
+  colliding source is moved aside before packing.
+
 ## [2.0.2] — 2026-09-11
 
 ### Fixed
