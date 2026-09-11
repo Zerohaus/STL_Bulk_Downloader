@@ -1783,6 +1783,53 @@ is_valid_archive_file() {
 }
 
 
+# Cheap structural test for "this archive is one we built". Our archives are
+# flat and their member names are already sanitised, so a single directory
+# separator, an embedded space or an AppleDouble prefix means it is still the
+# creator's own file. Reads only the central directory, never the payload.
+#
+# Both directions of a wrong answer are survivable: a creator archive that is
+# already flat and clean repacks to an identical result, and treating one as
+# finished leaves an archive that was acceptable anyway.
+archive_looks_repacked() {
+    local archive_path="$1"
+    local names=""
+    local entry=""
+
+    names="$(unzip -Z1 "$archive_path" 2>/dev/null)" || return 1
+    [[ -z "$names" ]] && return 1
+
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+        case "$entry" in
+            */*|*" "*|._*) return 1 ;;
+        esac
+    done <<< "$names"
+
+    return 0
+}
+
+# True when the named archive is really one of the model's declared source
+# files rather than something this script packaged. Only consulted when an
+# archive appears to already exist, so the jq cost is paid once per model at
+# most, and never on the common path.
+archive_is_declared_source() {
+    local source_json="$1"
+    local archive_name="$2"
+    local declared=""
+
+    [[ -z "$archive_name" ]] && return 1
+
+    while IFS= read -r declared; do
+        [[ -z "$declared" ]] && continue
+        if [[ "$(sanitize_filename "$declared")" == "$archive_name" ]]; then
+            return 0
+        fi
+    done < <($JQ_CMD -r '.files.items[]? | .filename // empty' "$source_json" 2>/dev/null)
+
+    return 1
+}
+
 find_existing_assets_archive() {
     local model_dir="$1"
     local archive_base="$2"
@@ -2054,7 +2101,17 @@ model_assets_already_archived() {
     # Deliberately not "does the directory have files in it" -- a folder of
     # loose .stl files with no archive is a half-built model, not a finished
     # one, and treating it as done is how a model silently goes missing.
-    find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null
+    local found=""
+    found="$(find_existing_assets_archive "$model_dir" "$archive_base")" || return 1
+
+    # ...and not a downloaded source file that merely shares the archive's
+    # name. Once repacked the finished archive keeps that name legitimately,
+    # so the structure decides, not the name.
+    if archive_is_declared_source "$source_json" "${found##*/}" && ! archive_looks_repacked "$found"; then
+        return 1
+    fi
+
+    return 0
 }
 
 append_zip_compress_stderr() {
@@ -2660,6 +2717,20 @@ compress_non_json_assets() {
     archive_base=$(get_model_archive_basename "$source_json" "$model_id")
     existing_archive=$(find_existing_assets_archive "$model_dir" "$archive_base" || true)
 
+    if [[ -n "$existing_archive" ]] && archive_is_declared_source "$source_json" "${existing_archive##*/}"         && ! archive_looks_repacked "$existing_archive"; then
+        # Same name as the archive we build, but it is the creator's own file
+        # and still needs expanding and repacking. Move it aside first: the
+        # source collector excludes anything matching the archive name, so
+        # leaving it where it is would hide the only file we have to pack.
+        # The "__src_" prefix also keeps it clear of the archive-name glob.
+        echo -e "  ${CYAN}[ZIP] Declared file shares the archive name; repacking it${NC}"
+        if ! mv -f "$existing_archive" "${model_dir}/__src_${existing_archive##*/}"; then
+            echo -e "  ${RED}[FAIL] Could not set aside $(basename "$existing_archive") for repacking${NC}"
+            return 1
+        fi
+        existing_archive=""
+    fi
+
     if [[ -n "$existing_archive" ]]; then
         existing_size=$(get_file_size "$existing_archive")
         echo -e "  ${GREEN}[SKIP] Assets archive already exists: $(basename "$existing_archive") (${existing_size} bytes)${NC}"
@@ -2667,8 +2738,6 @@ compress_non_json_assets() {
     fi
 
     archive_name="${archive_base}.zip"
-    archive_path=$(unique_output_path "$model_dir" "$archive_name")
-    archive_name=$(basename "$archive_path")
 
     collect_model_root_asset_files "$model_dir" "$archive_name" all_files
 
@@ -2777,6 +2846,23 @@ compress_non_json_assets() {
         return 1
     fi
 
+    # Validate before anything is deleted, while the sources can still be put
+    # back.
+    if ! is_valid_archive_file "${payload_dir}/${archive_name}"; then
+        print_archive_failure_report "${payload_dir}/${archive_name}" "archive failed integrity check after zip reported success" "${all_files[@]}"
+        rm -f "${payload_dir}/${archive_name}"
+        restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
+        echo -e "  ${RED}[FAIL] Created archive failed validation for model $model_id${NC}"
+        return 1
+    fi
+
+    # Sources go first so the archive can take its proper name even when a
+    # declared file was spelled identically.
+    for file_name in "${all_files[@]}"; do
+        rm -f "${model_dir}/${file_name}"
+    done
+
+    archive_path="${model_dir}/${archive_name}"
     if ! mv -f "${payload_dir}/${archive_name}" "$archive_path"; then
         echo -e "  ${RED}[FAIL] Could not move finished archive into ${model_dir}${NC}"
         rm -f "${payload_dir}/${archive_name}"
@@ -2784,25 +2870,12 @@ compress_non_json_assets() {
         return 1
     fi
 
-    if is_valid_archive_file "$archive_path"; then
-        # Only now are the sources expendable: the .zip files left in place for
-        # expansion, and the staged copies of everything else.
-        for file_name in "${all_files[@]}"; do
-            rm -f "${model_dir}/${file_name}"
-        done
-        rm -rf "$payload_dir"
-        ACTIVE_PAYLOAD_DIR=""
-        PAYLOAD_MOVED_ORIGINALS=()
-        zip_size=$(get_file_size "$archive_path")
-        echo -e "  ${GREEN}[OK] Created $(basename "$archive_path") (${zip_size} bytes)${NC}"
-        return 0
-    fi
-
-    print_archive_failure_report "$archive_path" "archive failed integrity check after zip reported success" "${all_files[@]}"
-    rm -f "$archive_path"
-    restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
-    echo -e "  ${RED}[FAIL] Created archive failed validation for model $model_id${NC}"
-    return 1
+    rm -rf "$payload_dir"
+    ACTIVE_PAYLOAD_DIR=""
+    PAYLOAD_MOVED_ORIGINALS=()
+    zip_size=$(get_file_size "$archive_path")
+    echo -e "  ${GREEN}[OK] Created $(basename "$archive_path") (${zip_size} bytes)${NC}"
+    return 0
 }
 
 echo -e "${CYAN}========================================================${NC}"
