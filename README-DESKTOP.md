@@ -25,7 +25,7 @@ See also: [DESKTOP_EXE.md](DESKTOP_EXE.md) (build installer), [CHANGELOG.md](CHA
 
 - Step 1 skips existing `model_<id>.json` files.
 - Step 2 skips files already on disk.
-- **Windows packaging:** the installer ships `tools/zip.exe` (Info-ZIP 3.0) so clients do not need to install `zip` separately. Each `.rar`/`.7z` from MMF is wrapped in its own `.zip` (`file.rar` → `file.zip`). MMF-delivered `.zip` files are left as-is.
+- **Windows packaging:** the installer ships `tools/zip.exe` (Info-ZIP 3.0) so clients do not need to install `zip` separately. See [Output layout](#output-layout) for what each model folder ends up containing.
 - If the session expires mid-run, capture a new session and re-run; completed work is kept.
 
 ## Auth
