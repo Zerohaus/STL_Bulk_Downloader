@@ -1077,6 +1077,7 @@ validate_zip_integrity() {
     local unzip_exe=""
     local zip_exe=""
     local validate_output=""
+    local magic=""
 
     ZIP_VALIDATE_REASON=""
 
@@ -1088,6 +1089,18 @@ validate_zip_integrity() {
     if [[ ! -s "$zip_file" ]]; then
         ZIP_VALIDATE_REASON="archive file is empty"
         return 1
+    fi
+
+    # Estimating work, not deciding whether to trust an archive: check the
+    # signature rather than every CRC in it. Uses the read builtin so this
+    # costs no process spawn.
+    if [[ "${ZIP_VALIDATION_QUICK:-0}" == "1" ]]; then
+        IFS= read -r -n 2 magic < "$zip_file" 2>/dev/null
+        if [[ "$magic" != "PK" ]]; then
+            ZIP_VALIDATE_REASON="archive does not start with the ZIP signature"
+            return 1
+        fi
+        return 0
     fi
 
     if unzip_exe="$(resolve_unzip_executable 2>/dev/null)"; then
@@ -1138,6 +1151,28 @@ is_valid_download_file() {
         validate_zip_integrity "$file_path" || return 1
     fi
 
+    return 0
+}
+
+# Same test, ordered for the scan: check the ZIP signature first so an archive
+# never pays for the HTML sniff, which costs a head and a grep.
+is_valid_download_file_quick() {
+    local file_path="$1"
+    local logical_name="$2"
+    local normalized_name=""
+
+    if [[ ! -f "$file_path" ]] || [[ ! -s "$file_path" ]]; then
+        return 1
+    fi
+
+    normalized_name="${logical_name,,}"
+    if [[ "$normalized_name" == *.zip ]]; then
+        # A signature match rules out an HTML error page on its own.
+        validate_zip_integrity "$file_path"
+        return $?
+    fi
+
+    is_html_error "$file_path" && return 1
     return 0
 }
 
@@ -1351,10 +1386,10 @@ cleanup_orphan_part_files() {
     while IFS= read -r -d '' part_file; do
         rm -f "$part_file"
         removed_count=$((removed_count + 1))
-    done < <(find . -type f -name "*.part" -print0 2>/dev/null)
+    done < <(find . -type f \( -name "*.part" -o -name "*.headers" \) -print0 2>/dev/null)
 
     if [[ "$removed_count" -gt 0 ]]; then
-        echo -e "${YELLOW}! Removed ${removed_count} orphan .part file(s) from previous interrupted runs.${NC}"
+        echo -e "${YELLOW}! Removed ${removed_count} leftover temp file(s) from previous interrupted runs.${NC}"
     fi
 }
 
@@ -1519,10 +1554,17 @@ sanitize_folder_name() {
 build_model_folder_name() {
     local source_json="$1"
     local model_id="$2"
+    local name_hint="${3:-}"
     local model_name=""
     local clean_name=""
 
-    model_name="$(trim_field "$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null)")"
+    if [[ -n "$name_hint" ]]; then
+        model_name="$name_hint"
+        while [[ "$model_name" == [[:space:]]* ]]; do model_name="${model_name#?}"; done
+        while [[ "$model_name" == *[[:space:]] ]]; do model_name="${model_name%?}"; done
+    else
+        model_name="$(trim_field "$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null)")"
+    fi
     clean_name=$(sanitize_folder_name "$model_name")
 
     if [[ "$FOLDER_NAMING_FORMAT" == "NAME_ONLY" ]]; then
@@ -1576,11 +1618,12 @@ find_existing_model_dir_by_id() {
 resolve_model_dir() {
     local model_id="$1"
     local json_file="$2"
+    local name_hint="${3:-}"
     local preferred=""
     local legacy="model_${model_id}"
     local existing=""
 
-    preferred=$(build_model_folder_name "$json_file" "$model_id")
+    preferred=$(build_model_folder_name "$json_file" "$model_id" "$name_hint")
 
     if [[ -d "$preferred" ]]; then
         printf '%s' "$preferred"
@@ -1707,10 +1750,17 @@ model_has_sanitized_filename_collisions() {
 get_model_archive_basename() {
     local source_json="$1"
     local model_id="$2"
+    local name_hint="${3:-}"
     local model_name=""
     local archive_base=""
 
-    model_name="$(trim_field "$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null)")"
+    if [[ -n "$name_hint" ]]; then
+        model_name="$name_hint"
+        while [[ "$model_name" == [[:space:]]* ]]; do model_name="${model_name#?}"; done
+        while [[ "$model_name" == *[[:space:]] ]]; do model_name="${model_name%?}"; done
+    else
+        model_name="$(trim_field "$($JQ_CMD -r '.name // ""' "$source_json" 2>/dev/null)")"
+    fi
     archive_base=$(sanitize_filename "$model_name")
 
     if [[ -z "$archive_base" || "$archive_base" == "null" ]]; then
@@ -1722,7 +1772,14 @@ get_model_archive_basename() {
 
 is_valid_archive_file() {
     local file_path="$1"
-    is_valid_download_file "$file_path" "$(basename "$file_path")"
+    local base_name="${file_path##*/}"
+
+    if [[ "${ZIP_VALIDATION_QUICK:-0}" == "1" ]]; then
+        is_valid_download_file_quick "$file_path" "$base_name"
+        return $?
+    fi
+
+    is_valid_download_file "$file_path" "$base_name"
 }
 
 
@@ -1976,9 +2033,10 @@ model_assets_already_archived() {
     local model_dir="$1"
     local source_json="$2"
     local model_id="$3"
+    local name_hint="${4:-}"
     local archive_base=""
 
-    archive_base=$(get_model_archive_basename "$source_json" "$model_id")
+    archive_base=$(get_model_archive_basename "$source_json" "$model_id" "$name_hint")
 
     # Deliberately not "does the directory have files in it" -- a folder of
     # loose .stl files with no archive is a half-built model, not a finished
@@ -2133,14 +2191,20 @@ run_zip_compress() {
     return "$compression_exit"
 }
 
+
 count_model_progress_units() {
     local source_json="$1"
     local model_id="$2"
+    local downloadable_count="${3:-}"
+    local image_count="${4:-}"
+    local name_hint="${5:-}"
     local model_dir
-    local downloadable_count
-    local image_count
 
-    downloadable_count=$($JQ_CMD -r '[.files.items[]? | .download_url | select(. != null and . != "")] | length' "$source_json" 2>/dev/null)
+    # Counts and name are normally supplied by the single bulk jq pass in the
+    # scan; the per-file fallbacks below keep this callable on its own.
+    if [[ ! "$downloadable_count" =~ ^[0-9]+$ ]]; then
+        downloadable_count=$($JQ_CMD -r '[.files.items[]? | .download_url | select(. != null and . != "")] | length' "$source_json" 2>/dev/null)
+    fi
     if [[ ! "$downloadable_count" =~ ^[0-9]+$ ]]; then
         downloadable_count=0
     fi
@@ -2150,13 +2214,15 @@ count_model_progress_units() {
         return
     fi
 
-    image_count=$($JQ_CMD -r '[.images[]? | .original.url | select(. != null and . != "")] | length' "$source_json" 2>/dev/null)
+    if [[ ! "$image_count" =~ ^[0-9]+$ ]]; then
+        image_count=$($JQ_CMD -r '[.images[]? | .original.url | select(. != null and . != "")] | length' "$source_json" 2>/dev/null)
+    fi
     if [[ ! "$image_count" =~ ^[0-9]+$ ]]; then
         image_count=0
     fi
 
-    model_dir=$(resolve_model_dir "$model_id" "$source_json")
-    if model_assets_already_archived "$model_dir" "$source_json" "$model_id"; then
+    model_dir=$(resolve_model_dir "$model_id" "$source_json" "$name_hint")
+    if model_assets_already_archived "$model_dir" "$source_json" "$model_id" "$name_hint"; then
         echo $((image_count + 3))
         return
     fi
@@ -2958,13 +3024,48 @@ models_without_file_downloads=0
 ASSET_PROGRESS_TOTAL_UNITS=0
 ASSET_PROGRESS_DONE_UNITS=0
 ASSET_PROGRESS_MODELS_DONE=0
-for json_file in "${model_json_files[@]}"; do
-    model_id_for_count=$(basename "$json_file" | sed 's/model_//; s/.json//')
-    model_units=$(count_model_progress_units "$json_file" "$model_id_for_count")
+scan_index=0
+echo -e "${CYAN}Checking which of the $json_count model(s) are already complete...${NC}"
+emit_progress_event "{\"step\":\"scan\",\"event\":\"start\",\"totalModels\":$json_count}"
+ZIP_VALIDATION_QUICK=1
+
+# One jq invocation for every metadata file. Called per model it costs ~88 ms
+# each on Windows and the scan needed about five per model -- around a minute
+# of process startup before the first download on a 135-model library.
+scan_facts=$($JQ_CMD -r '
+    (input_filename | split("model_") | last | split(".json") | first) as $id
+    | ([.files.items[]? | .download_url | select(. != null and . != "")] | length) as $dl
+    | ([.images[]? | .original.url | select(. != null and . != "")] | length) as $img
+    | "\($id)\u0001\($dl)\u0001\($img)\u0001\(.name // "")"
+' "${model_json_files[@]}" 2>/dev/null)
+
+while IFS=$'\001' read -r scan_id scan_dl scan_img scan_name; do
+    [[ -z "$scan_id" ]] && continue
+    scan_index=$((scan_index + 1))
+    model_units=$(count_model_progress_units "model_${scan_id}.json" "$scan_id" "$scan_dl" "$scan_img" "$scan_name")
     if [[ "$model_units" =~ ^[0-9]+$ ]]; then
         ASSET_PROGRESS_TOTAL_UNITS=$((ASSET_PROGRESS_TOTAL_UNITS + model_units))
     fi
-done
+    # Keep an unattended run visibly alive without one line per model.
+    if [[ $((scan_index % 25)) -eq 0 ]] || [[ "$scan_index" -eq "$json_count" ]]; then
+        echo -e "  ${CYAN}Checked ${scan_index}/${json_count}${NC}"
+        emit_progress_event "{\"step\":\"scan\",\"event\":\"progress\",\"done\":${scan_index},\"totalModels\":$json_count}"
+    fi
+done <<< "$scan_facts"
+
+# If the bulk pass produced nothing usable (unreadable metadata, an unexpected
+# jq), fall back to the original per-file walk rather than a bogus total.
+if [[ "$scan_index" -eq 0 ]]; then
+    for json_file in "${model_json_files[@]}"; do
+        model_id_for_count=$(basename "$json_file" | sed 's/model_//; s/.json//')
+        model_units=$(count_model_progress_units "$json_file" "$model_id_for_count")
+        if [[ "$model_units" =~ ^[0-9]+$ ]]; then
+            ASSET_PROGRESS_TOTAL_UNITS=$((ASSET_PROGRESS_TOTAL_UNITS + model_units))
+        fi
+    done
+fi
+ZIP_VALIDATION_QUICK=0
+emit_progress_event "{\"step\":\"scan\",\"event\":\"done\",\"totalModels\":$json_count}"
 if [[ "$ASSET_PROGRESS_TOTAL_UNITS" -eq 0 ]]; then
     ASSET_PROGRESS_TOTAL_UNITS="$json_count"
 fi
