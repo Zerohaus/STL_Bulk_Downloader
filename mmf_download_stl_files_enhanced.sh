@@ -64,6 +64,31 @@ TEST_MODE=false
 MAX_CONSECUTIVE_FAILURES=3  # Stop if this many downloads fail in a row
 STL_FILE_DELAY_SEC="${MMF_STL_FILE_DELAY_SEC:-5}"
 IMAGE_DELAY_SEC="${MMF_IMAGE_DELAY_SEC:-3}"
+
+# --- Adaptive pacing -------------------------------------------------------
+# Two full-library pulls proved the limiter is not a published quota: one run
+# needed ~68s between requests, another did 233 models at a flat 12s with zero
+# throttles. A hard-coded rate cannot survive both, so STL_FILE_DELAY_SEC is
+# only the *floor*. The live gap widens on every app-level throttle and creeps
+# back down after a run of clean responses.
+ADAPTIVE_PACING="${MMF_ADAPTIVE_PACING:-1}"
+ADAPTIVE_DELAY_MAX_SEC="${MMF_ADAPTIVE_DELAY_MAX_SEC:-120}"
+# Widen multiplier (x1.8) and recovery divisor (/1.3), expressed as integer
+# percentages so the arithmetic stays inside bash.
+ADAPTIVE_WIDEN_PCT="${MMF_ADAPTIVE_WIDEN_PCT:-180}"
+ADAPTIVE_NARROW_PCT="${MMF_ADAPTIVE_NARROW_PCT:-77}"
+# Clean downloads required before the gap is allowed to narrow one step.
+ADAPTIVE_RECOVERY_STREAK="${MMF_ADAPTIVE_RECOVERY_STREAK:-10}"
+ADAPTIVE_DELAY_SEC="$STL_FILE_DELAY_SEC"
+ADAPTIVE_CLEAN_STREAK=0
+
+# --- Whole-model archive route --------------------------------------------
+# /download/<id> returns an entire model in a single request; fetching each
+# file from files.items[] separately costs 3-4x the requests against the only
+# endpoint that throttles. Prefer the one-request route and fall back to
+# per-file only when it is unavailable or incomplete.
+WHOLE_MODEL_ROUTE="${MMF_WHOLE_MODEL_ROUTE:-1}"
+MMF_BASE_URL="${MMF_BASE_URL:-https://www.myminifactory.com}"
 MIN_FREE_SPACE_MB="${MMF_MIN_FREE_SPACE_MB:-2048}"
 DISK_MARGIN_MB_PER_FILE="${MMF_DISK_MARGIN_MB_PER_FILE:-512}"
 DISK_MARGIN_MB_MODEL="${MMF_DISK_MARGIN_MB_MODEL:-1024}"
@@ -441,6 +466,8 @@ wait_out_cloudflare_cooldown() {
         CLOUDFLARE_COOLDOWN_STAGE=$((CLOUDFLARE_COOLDOWN_STAGE + 1))
     fi
 
+    widen_adaptive_delay
+
     echo -e "${CYAN}Resuming after Cloudflare challenge cooldown wait.${NC}"
     emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"resumed\",\"kind\":\"cloudflare\"}"
 }
@@ -448,6 +475,85 @@ wait_out_cloudflare_cooldown() {
 # Waits out MyMiniFactory's own app-level throttle (no Cloudflare challenge
 # involved). Escalates 5 -> 10 -> 15 minutes, then holds at 15; resets the next
 # time a download actually succeeds.
+# --- Adaptive pacing -------------------------------------------------------
+# A 403 without a cf-mitigated header is the limiter saying "too fast *now*".
+# Treat it as permanent information about the pace rather than a one-off: widen
+# the inter-request gap and only creep back down after a sustained clean run.
+widen_adaptive_delay() {
+    local previous="$ADAPTIVE_DELAY_SEC"
+    local widened
+
+    ADAPTIVE_CLEAN_STREAK=0
+
+    if [[ "$ADAPTIVE_PACING" != "1" ]]; then
+        return 0
+    fi
+
+    widened=$(( (ADAPTIVE_DELAY_SEC * ADAPTIVE_WIDEN_PCT + 99) / 100 ))
+    if [[ "$widened" -le "$ADAPTIVE_DELAY_SEC" ]]; then
+        widened=$((ADAPTIVE_DELAY_SEC + 1))
+    fi
+    if [[ "$widened" -gt "$ADAPTIVE_DELAY_MAX_SEC" ]]; then
+        widened="$ADAPTIVE_DELAY_MAX_SEC"
+    fi
+
+    ADAPTIVE_DELAY_SEC="$widened"
+
+    if [[ "$ADAPTIVE_DELAY_SEC" -ne "$previous" ]]; then
+        echo -e "  ${YELLOW}[PACE] Widening request gap ${previous}s -> ${ADAPTIVE_DELAY_SEC}s after throttle${NC}"
+        emit_progress_event "{\"step\":\"pacing\",\"event\":\"widened\",\"delaySec\":${ADAPTIVE_DELAY_SEC}}"
+    fi
+}
+
+# Called after each clean download. Narrowing is deliberately slower than
+# widening -- a pace that was punished once is more likely to be punished again.
+note_adaptive_success() {
+    local previous="$ADAPTIVE_DELAY_SEC"
+    local narrowed
+
+    if [[ "$ADAPTIVE_PACING" != "1" ]]; then
+        return 0
+    fi
+
+    if [[ "$ADAPTIVE_DELAY_SEC" -le "$STL_FILE_DELAY_SEC" ]]; then
+        ADAPTIVE_CLEAN_STREAK=0
+        return 0
+    fi
+
+    ADAPTIVE_CLEAN_STREAK=$((ADAPTIVE_CLEAN_STREAK + 1))
+    if [[ "$ADAPTIVE_CLEAN_STREAK" -lt "$ADAPTIVE_RECOVERY_STREAK" ]]; then
+        return 0
+    fi
+
+    ADAPTIVE_CLEAN_STREAK=0
+    narrowed=$(( (ADAPTIVE_DELAY_SEC * ADAPTIVE_NARROW_PCT) / 100 ))
+    if [[ "$narrowed" -ge "$ADAPTIVE_DELAY_SEC" ]]; then
+        narrowed=$((ADAPTIVE_DELAY_SEC - 1))
+    fi
+    if [[ "$narrowed" -lt "$STL_FILE_DELAY_SEC" ]]; then
+        narrowed="$STL_FILE_DELAY_SEC"
+    fi
+
+    ADAPTIVE_DELAY_SEC="$narrowed"
+
+    if [[ "$ADAPTIVE_DELAY_SEC" -ne "$previous" ]]; then
+        echo -e "  ${CYAN}[PACE] Narrowing request gap ${previous}s -> ${ADAPTIVE_DELAY_SEC}s after ${ADAPTIVE_RECOVERY_STREAK} clean downloads${NC}"
+        emit_progress_event "{\"step\":\"pacing\",\"event\":\"narrowed\",\"delaySec\":${ADAPTIVE_DELAY_SEC}}"
+    fi
+}
+
+adaptive_sleep() {
+    local delay="$ADAPTIVE_DELAY_SEC"
+
+    if [[ "$ADAPTIVE_PACING" != "1" ]]; then
+        delay="$STL_FILE_DELAY_SEC"
+    fi
+
+    if [[ "$delay" -gt 0 ]]; then
+        sleep "$delay"
+    fi
+}
+
 wait_out_app_throttle() {
     local context="$1"
     local max_index=$((${#APP_THROTTLE_STEPS_MIN[@]} - 1))
@@ -475,6 +581,8 @@ wait_out_app_throttle() {
     if [[ $APP_THROTTLE_STAGE -lt $max_index ]]; then
         APP_THROTTLE_STAGE=$((APP_THROTTLE_STAGE + 1))
     fi
+
+    widen_adaptive_delay
 
     echo -e "${CYAN}Resuming after app-level throttle wait.${NC}"
     emit_progress_event "{\"step\":\"cloudflare_cooldown\",\"event\":\"resumed\",\"kind\":\"app_throttle\"}"
@@ -1154,6 +1262,76 @@ download_file_with_guards() {
     return 0
 }
 
+STAGING_ROOT="${MMF_STAGING_ROOT:-.mmf_staging}"
+ACTIVE_STAGING_DIR=""
+ACTIVE_PAYLOAD_DIR=""
+ACTIVE_PAYLOAD_MODEL_DIR=""
+PAYLOAD_MOVED_ORIGINALS=()
+
+# Hands back a directory to build this model in. Any work a previous run left
+# behind -- whether it was interrupted in staging or had already been moved
+# into place -- is adopted so resume stays free.
+prepare_model_staging_dir() {
+    local final_dir="$1"
+    local staging="${STAGING_ROOT}/$(basename "$final_dir")"
+
+    mkdir -p "$STAGING_ROOT" 2>/dev/null || true
+
+    if [[ -d "$final_dir" ]]; then
+        rm -rf "$staging"
+        if ! mv "$final_dir" "$staging" 2>/dev/null; then
+            # Could not adopt it (locked by Explorer, cross-device, ...) --
+            # build in place rather than losing the existing work.
+            printf '%s' "$final_dir"
+            return 0
+        fi
+    elif [[ ! -d "$staging" ]]; then
+        if ! mkdir -p "$staging" 2>/dev/null; then
+            printf '%s' "$final_dir"
+            return 0
+        fi
+    fi
+
+    printf '%s' "$staging"
+}
+
+# Moves a finished model into the library. Only called once the archive exists.
+finalize_model_staging_dir() {
+    local staging="$1"
+    local final_dir="$2"
+
+    if [[ "$staging" == "$final_dir" ]]; then
+        return 0
+    fi
+
+    if [[ ! -d "$staging" ]]; then
+        return 1
+    fi
+
+    rm -rf "$final_dir"
+    if ! mv "$staging" "$final_dir" 2>/dev/null; then
+        echo -e "  ${RED}[FAIL] Could not move finished model into place: ${final_dir}${NC}"
+        return 1
+    fi
+
+    return 0
+}
+
+# A 140 GB run gets killed at least once. Leave nothing half-written behind.
+cleanup_on_interrupt() {
+    trap - INT TERM
+    echo ""
+    echo -e "${YELLOW}Interrupted — cleaning up partial downloads...${NC}"
+
+    if [[ -n "$ACTIVE_PAYLOAD_DIR" ]] && [[ -d "$ACTIVE_PAYLOAD_DIR" ]]; then
+        restore_payload_originals "$ACTIVE_PAYLOAD_MODEL_DIR" "$ACTIVE_PAYLOAD_DIR" "${PAYLOAD_MOVED_ORIGINALS[@]}"
+    fi
+
+    cleanup_orphan_part_files
+    echo -e "${CYAN}Partial work is left in ${STAGING_ROOT}/ and will be resumed on the next run.${NC}"
+    exit 130
+}
+
 cleanup_orphan_part_files() {
     local removed_count=0
 
@@ -1189,7 +1367,7 @@ sanitize_filename() {
     sanitized_name=$(printf "%s" "$original_name" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')
     sanitized_name="$(trim_field "$sanitized_name")"
     sanitized_name="$(normalize_unicode_homoglyphs "$sanitized_name")"
-    sanitized_name=$(printf "%s" "$sanitized_name" | sed -E "s/[<>:\"/\\|?*]/_/g; s/'//g; s/[[:space:]]+/ /g")
+    sanitized_name=$(printf "%s" "$sanitized_name" | sed -E "s/[<>:\"/\\|?*]//g; s/'//g; s/[[:space:]]+/ /g")
     sanitized_name="${sanitized_name// /_}"
     sanitized_name=$(printf "%s" "$sanitized_name" | sed -E 's/_+/_/g')
 
@@ -1250,7 +1428,7 @@ sanitize_folder_name() {
     cleaned="$(printf "%s" "$name" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
     cleaned="$(trim_field "$cleaned")"
     cleaned="$(normalize_unicode_homoglyphs "$cleaned")"
-    cleaned="$(printf "%s" "$cleaned" | sed -E "s/[<>:\"/\\|?*]/_/g; s/'//g; s/[[:space:]]+/ /g")"
+    cleaned="$(printf "%s" "$cleaned" | sed -E "s/[<>:\"/\\|?*]//g; s/'//g; s/[[:space:]]+/ /g")"
     cleaned="${cleaned// /_}"
     cleaned="$(printf "%s" "$cleaned" | sed -E 's/_+/_/g; s/[. ]+$//; s/^[_.]+//; s/[_.]+$//')"
 
@@ -1309,11 +1487,34 @@ unique_model_dir_name() {
     printf '%s' "${desired_name}_${suffix}"
 }
 
+# Releases before the sanitiser switched to *deleting* Windows-reserved
+# characters wrote them as underscores ("Ork_Warboss" where the convention is
+# "OrkWarboss"). Adopting the verified rule must not orphan a library built by
+# an older version, so look for any directory already claiming this model id
+# before minting a new name.
+find_existing_model_dir_by_id() {
+    local model_id="$1"
+    local candidate=""
+
+    shopt -s nullglob
+    for candidate in "${model_id}_"*; do
+        if [[ -d "$candidate" ]]; then
+            shopt -u nullglob
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    shopt -u nullglob
+
+    return 1
+}
+
 resolve_model_dir() {
     local model_id="$1"
     local json_file="$2"
     local preferred=""
     local legacy="model_${model_id}"
+    local existing=""
 
     preferred=$(build_model_folder_name "$json_file" "$model_id")
 
@@ -1324,6 +1525,11 @@ resolve_model_dir() {
 
     if [[ -d "$legacy" ]]; then
         printf '%s' "$legacy"
+        return
+    fi
+
+    if [[ "$FOLDER_NAMING_FORMAT" != "NAME_ONLY" ]] && existing=$(find_existing_model_dir_by_id "$model_id"); then
+        printf '%s' "$existing"
         return
     fi
 
@@ -1455,6 +1661,7 @@ is_valid_archive_file() {
     is_valid_download_file "$file_path" "$(basename "$file_path")"
 }
 
+
 find_existing_assets_archive() {
     local model_dir="$1"
     local archive_base="$2"
@@ -1539,6 +1746,154 @@ ensure_compress_free_space() {
     ensure_min_free_space "$model_dir" "$required_mb" "$context"
 }
 
+# Expands one .zip into dest_dir, sanitising every member name on the way out
+# and recursing into members that are themselves .zip archives. Observed
+# nesting runs two deep, so a single pass is not enough; the depth cap is a
+# guard against a maliciously or accidentally self-nesting archive.
+MAX_NESTED_ZIP_DEPTH="${MMF_MAX_NESTED_ZIP_DEPTH:-4}"
+EXPANDED_FROM_ZIP_COUNT=0
+# Entries destined for the flat archive, split by how they should be stored.
+# Plain files keep their bytes verbatim (STORED) so entry sizes still match the
+# API's declared sizes; anything unpacked out of a .zip goes back in DEFLATED.
+PAYLOAD_STORE_NAMES=()
+PAYLOAD_DEFLATE_NAMES=()
+ZIP_COMPRESS_LEVEL="-0"
+ZIP_COMPRESS_APPEND=0
+
+expand_zip_into_payload() {
+    local zip_path="$1"
+    local dest_dir="$2"
+    local depth="${3:-1}"
+    local work_dir=""
+    local member_path=""
+    local member_name=""
+    local sanitized=""
+    local lower_name=""
+    local target=""
+
+    if [[ "$depth" -gt "$MAX_NESTED_ZIP_DEPTH" ]]; then
+        echo -e "  ${YELLOW}[ZIP-WARN] Nested archive depth limit (${MAX_NESTED_ZIP_DEPTH}) reached; storing $(basename "$zip_path") as-is${NC}"
+        sanitized=$(sanitize_filename "$(basename "$zip_path")")
+        target="$(reserve_payload_name "$sanitized" "$dest_dir")"
+        cp -f "$zip_path" "${dest_dir}/${target}" || return 1
+        PAYLOAD_STORE_NAMES+=("$target")
+        return 0
+    fi
+
+    if ! command -v unzip >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}[ZIP-WARN] unzip not available; cannot expand nested archive $(basename "$zip_path")${NC}"
+        return 1
+    fi
+
+    work_dir="${dest_dir}/.expand.$$.${depth}"
+    rm -rf "$work_dir"
+    mkdir -p "$work_dir" || return 1
+
+    if ! unzip -qq -o "$zip_path" -d "$work_dir" >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}[ZIP-WARN] Could not expand $(basename "$zip_path"); keeping it as a stored member${NC}"
+        rm -rf "$work_dir"
+        sanitized=$(sanitize_filename "$(basename "$zip_path")")
+        target="$(reserve_payload_name "$sanitized" "$dest_dir")"
+        cp -f "$zip_path" "${dest_dir}/${target}" || return 1
+        PAYLOAD_STORE_NAMES+=("$target")
+        return 0
+    fi
+
+    # The target layout is flat, so nested directory structure is discarded and
+    # only the leaf names survive (sanitised, and de-duplicated on collision).
+    while IFS= read -r -d '' member_path; do
+        member_name="$(basename "$member_path")"
+        lower_name="$(printf '%s' "$member_name" | tr '[:upper:]' '[:lower:]')"
+
+        if [[ "$lower_name" == *.zip ]]; then
+            expand_zip_into_payload "$member_path" "$dest_dir" "$((depth + 1))" || {
+                rm -rf "$work_dir"
+                return 1
+            }
+            continue
+        fi
+
+        sanitized=$(sanitize_filename "$member_name")
+        target="$(reserve_payload_name "$sanitized" "$dest_dir")"
+        mv -f "$member_path" "${dest_dir}/${target}" || {
+            rm -rf "$work_dir"
+            return 1
+        }
+        PAYLOAD_DEFLATE_NAMES+=("$target")
+        EXPANDED_FROM_ZIP_COUNT=$((EXPANDED_FROM_ZIP_COUNT + 1))
+    done < <(find "$work_dir" -type f -print0 2>/dev/null)
+
+    rm -rf "$work_dir"
+    return 0
+}
+
+# Flat archives cannot express two members with the same leaf name, which
+# nested archives routinely produce. Keep both by suffixing the later one.
+# Total on-disk size of a staged payload, used for the Zip64 decision.
+sum_payload_bytes() {
+    local payload_dir="$1"
+    local total_bytes=0
+    local file_size=""
+    local file_path=""
+
+    while IFS= read -r -d '' file_path; do
+        file_size=$(get_file_size "$file_path")
+        if [[ "$file_size" =~ ^[0-9]+$ ]]; then
+            total_bytes=$((total_bytes + file_size))
+        fi
+    done < <(find "$payload_dir" -maxdepth 1 -type f -print0 2>/dev/null)
+
+    printf '%s' "$total_bytes"
+}
+
+# Packaging failed, so put the staged originals back where the resume logic
+# expects to find them. Files expanded out of a .zip need no restoring: the
+# source .zip was only read, never moved.
+restore_payload_originals() {
+    local model_dir="$1"
+    local payload_dir="$2"
+    shift 2
+    local entry=""
+    local staged_name=""
+    local original_name=""
+
+    for entry in "$@"; do
+        staged_name="${entry%%|*}"
+        original_name="${entry#*|}"
+        if [[ -f "${payload_dir}/${staged_name}" ]]; then
+            mv -f "${payload_dir}/${staged_name}" "${model_dir}/${original_name}" 2>/dev/null || true
+        fi
+    done
+
+    rm -rf "$payload_dir"
+    ACTIVE_PAYLOAD_DIR=""
+    PAYLOAD_MOVED_ORIGINALS=()
+}
+
+reserve_payload_name() {
+    local desired="$1"
+    local dest_dir="$2"
+    local base="$desired"
+    local ext=""
+    local suffix=1
+
+    if [[ ! -e "${dest_dir}/${desired}" ]]; then
+        printf '%s' "$desired"
+        return
+    fi
+
+    if [[ "$desired" == *.* ]] && [[ "$desired" != .* ]]; then
+        base="${desired%.*}"
+        ext=".${desired##*.}"
+    fi
+
+    while [[ -e "${dest_dir}/${base}_${suffix}${ext}" ]]; do
+        suffix=$((suffix + 1))
+    done
+
+    printf '%s' "${base}_${suffix}${ext}"
+}
+
 is_rar_or_7z_name() {
     local lower_name="$1"
 
@@ -1552,165 +1907,19 @@ is_rar_or_7z_name() {
     esac
 }
 
-zip_wrapper_name_for_archive() {
-    local archive_file_name="$1"
-    local base_name="${archive_file_name%.*}"
-
-    if [[ -z "$base_name" ]]; then
-        base_name="$archive_file_name"
-    fi
-
-    printf '%s.zip' "$base_name"
-}
-
-model_root_assets_are_standalone_zips() {
-    local model_dir="$1"
-    local exclude_name="$2"
-    local found_any=0
-    local file_path base_name lower_name
-
-    while IFS= read -r -d '' file_path; do
-        found_any=1
-        base_name=$(basename "$file_path")
-        lower_name=$(printf '%s' "$base_name" | tr '[:upper:]' '[:lower:]')
-        if [[ "$lower_name" != *.zip ]]; then
-            return 1
-        fi
-        if ! is_valid_archive_file "$file_path"; then
-            return 1
-        fi
-    done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$exclude_name" -print0 2>/dev/null)
-
-    [[ "$found_any" -eq 1 ]]
-}
-
-wrap_archive_file_in_zip() {
-    local model_dir="$1"
-    local archive_file_name="$2"
-    local model_id="$3"
-    local zip_name=""
-    local zip_path=""
-    local archive_path=""
-    local input_bytes=0
-    local compression_exit=0
-
-    zip_name=$(zip_wrapper_name_for_archive "$archive_file_name")
-    zip_path="${model_dir}/${zip_name}"
-    archive_path="${model_dir}/${archive_file_name}"
-
-    if [[ ! -f "$archive_path" ]]; then
-        return 0
-    fi
-
-    if is_valid_archive_file "$zip_path"; then
-        local existing_zip_size
-        existing_zip_size=$(get_file_size "$zip_path")
-        echo -e "  ${GREEN}[SKIP] ZIP wrapper already exists: ${zip_name} (${existing_zip_size} bytes)${NC}"
-        rm -f "$archive_path"
-        return 0
-    fi
-
-    input_bytes=$(get_file_size "$archive_path")
-    if ! ensure_compress_free_space "$model_dir" "wrapping ${archive_file_name} in ${zip_name} for model $model_id" "$input_bytes"; then
-        abort_no_space "wrapping ${archive_file_name} for model $model_id"
-    fi
-
-    rm -f "$zip_path"
-    echo -e "  ${CYAN}[ZIP] Wrapping ${archive_file_name} → ${zip_name}${NC}"
-
-    if ! resolve_zip_executable >/dev/null 2>&1; then
-        ZIP_COMPRESS_FAILURE="zip executable not found (expected bundled tools/zip.exe or system zip in PATH)"
-        print_archive_failure_report "$zip_path" "zip command failed (exit 127)" "$archive_file_name"
-        echo -e "  ${RED}[FAIL] Failed to create ${zip_name}${NC}"
-        return 1
-    fi
-
-    run_zip_compress "$model_dir" "$zip_name" "$input_bytes" "$archive_file_name"
-    compression_exit=$?
-
-    if [[ "$compression_exit" -ne 0 ]]; then
-        print_archive_failure_report "$zip_path" "zip command failed (exit ${compression_exit})" "$archive_file_name"
-        rm -f "$zip_path"
-        echo -e "  ${RED}[FAIL] Failed to create ${zip_name}${NC}"
-        return 1
-    fi
-
-    if is_valid_archive_file "$zip_path"; then
-        rm -f "$archive_path"
-        local zip_size
-        zip_size=$(get_file_size "$zip_path")
-        echo -e "  ${GREEN}[OK] Created ${zip_name} (contains ${archive_file_name}, ${zip_size} bytes)${NC}"
-        return 0
-    fi
-
-    rm -f "$zip_path"
-    if [[ -z "$ZIP_VALIDATE_REASON" ]]; then
-        ZIP_VALIDATE_REASON="archive failed integrity check after zip reported success"
-    fi
-    print_archive_failure_report "$zip_path" "integrity validation failed" "$archive_file_name"
-    echo -e "  ${RED}[FAIL] Failed to create ${zip_name}${NC}"
-    return 1
-}
-
-wrap_rar_7z_archives_individually() {
-    local model_dir="$1"
-    local model_id="$2"
-    shift 2
-    local -a archive_files=("$@")
-    local archive_file_name=""
-
-    for archive_file_name in "${archive_files[@]}"; do
-        if ! wrap_archive_file_in_zip "$model_dir" "$archive_file_name" "$model_id"; then
-            return 1
-        fi
-    done
-
-    return 0
-}
 
 model_assets_already_archived() {
     local model_dir="$1"
     local source_json="$2"
     local model_id="$3"
     local archive_base=""
-    local -a all_files=()
-    local file_name lower_name zip_wrapper=""
-    local has_loose_files=0
-    local has_rar_7z=0
 
     archive_base=$(get_model_archive_basename "$source_json" "$model_id")
-    collect_model_root_asset_files "$model_dir" "" all_files
 
-    if [[ ${#all_files[@]} -eq 0 ]]; then
-        return 1
-    fi
-
-    for file_name in "${all_files[@]}"; do
-        lower_name=$(printf '%s' "$file_name" | tr '[:upper:]' '[:lower:]')
-        if is_rar_or_7z_name "$lower_name"; then
-            has_rar_7z=1
-            zip_wrapper=$(zip_wrapper_name_for_archive "$file_name")
-            if ! is_valid_archive_file "${model_dir}/${zip_wrapper}"; then
-                return 1
-            fi
-        elif [[ "$lower_name" == *.zip ]]; then
-            if ! is_valid_archive_file "${model_dir}/${file_name}"; then
-                return 1
-            fi
-        else
-            has_loose_files=1
-        fi
-    done
-
-    if [[ "$has_loose_files" -eq 0 ]]; then
-        return 0
-    fi
-
-    if find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null; then
-        return 0
-    fi
-
-    return 1
+    # Deliberately not "does the directory have files in it" -- a folder of
+    # loose .stl files with no archive is a half-built model, not a finished
+    # one, and treating it as done is how a model silently goes missing.
+    find_existing_assets_archive "$model_dir" "$archive_base" >/dev/null
 }
 
 append_zip_compress_stderr() {
@@ -1744,8 +1953,10 @@ run_zip_compress() {
     local batch_end=0
     local -a batch_files=()
     local grow_mode=0
-    local zip_store_flags=(-q -0)
-    local zip_grow_flags=(-q -0 -g)
+    local level_flag="${ZIP_COMPRESS_LEVEL:--0}"
+    local append_mode="${ZIP_COMPRESS_APPEND:-0}"
+    local zip_store_flags=(-q "$level_flag")
+    local zip_grow_flags=(-q "$level_flag" -g)
     local tried_zip64=0
 
     ZIP_COMPRESS_TOOL=""
@@ -1759,8 +1970,8 @@ run_zip_compress() {
     fi
 
     if [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > ZIP64_RETRY_BYTES )); then
-        zip_store_flags=(-q -fz -0)
-        zip_grow_flags=(-q -fz -0 -g)
+        zip_store_flags=(-q -fz "$level_flag")
+        zip_grow_flags=(-q -fz "$level_flag" -g)
         echo -e "  ${CYAN}[ZIP] Using Zip64 mode (-fz) for $(format_bytes_human "$expected_bytes") payload${NC}"
     fi
 
@@ -1776,10 +1987,15 @@ run_zip_compress() {
 
     zip_stderr="$(mktemp "${TMPDIR:-/tmp}/mmf-zip-err.XXXXXX" 2>/dev/null || mktemp /tmp/mmf-zip-err.XXXXXX)"
 
-    rm -f "${model_dir}/${archive_name}"
+    if [[ "$append_mode" -eq 1 ]]; then
+        ZIP_COMPRESS_PHASE="batch append (${#files_to_zip[@]} file(s), ${level_flag})"
+        grow_mode=1
+    else
+        rm -f "${model_dir}/${archive_name}"
+        ZIP_COMPRESS_PHASE="batch create (${#files_to_zip[@]} file(s), ${level_flag})"
+        grow_mode=0
+    fi
     : > "$zip_stderr"
-    ZIP_COMPRESS_PHASE="batch create (${#files_to_zip[@]} file(s))"
-    grow_mode=0
     index=0
     while [[ "$index" -lt "${#files_to_zip[@]}" ]]; do
         batch_end=$((index + batch_size))
@@ -1807,13 +2023,17 @@ run_zip_compress() {
         && [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > ZIP64_RETRY_BYTES )); then
         tried_zip64=1
         echo -e "  ${YELLOW}[ZIP] Retrying archive creation with Zip64 (-fz)...${NC}"
-        rm -f "${model_dir}/${archive_name}"
+        if [[ "$append_mode" -eq 1 ]]; then
+            grow_mode=1
+        else
+            rm -f "${model_dir}/${archive_name}"
+            grow_mode=0
+        fi
         : > "$zip_stderr"
         ZIP_COMPRESS_PHASE="Zip64 batch retry"
-        grow_mode=0
         index=0
-        zip_store_flags=(-q -fz -0)
-        zip_grow_flags=(-q -fz -0 -g)
+        zip_store_flags=(-q -fz "$level_flag")
+        zip_grow_flags=(-q -fz "$level_flag" -g)
         while [[ "$index" -lt "${#files_to_zip[@]}" ]]; do
             batch_end=$((index + batch_size))
             batch_files=("${files_to_zip[@]:index:batch_size}")
@@ -1888,8 +2108,21 @@ write_compact_model_json() {
     local output_tmp="${output_json}.part"
     local selected_categories_json="${MMF_CATEGORY_SELECTION_JSON:-[]}"
     local selected_category_tag_names_json="${MMF_CATEGORY_SELECTION_TAG_NAMES_JSON:-[]}"
+    local cached_description=""
+    local live_description=""
 
     rm -f "$output_tmp"
+
+    # A description is only ever replaced by a non-empty one. An unauthenticated
+    # or partially-valid session silently nulls this field, and losing a
+    # description that way is invisible until much later.
+    live_description="$($JQ_CMD -r '.description // ""' "$source_json" 2>/dev/null)"
+    if [[ -z "$live_description" ]] && [[ -f "$output_json" ]]; then
+        cached_description="$($JQ_CMD -r '.description // ""' "$output_json" 2>/dev/null)"
+        if [[ -n "$cached_description" ]]; then
+            echo -e "  ${YELLOW}[META] Live metadata has no description; keeping the one already on disk.${NC}"
+        fi
+    fi
 
     if ! ensure_min_free_space "$output_json" "$MIN_FREE_SPACE_MB" "writing compact JSON for model $model_id"; then
         abort_no_space "writing compact JSON for model $model_id"
@@ -1903,9 +2136,9 @@ write_compact_model_json() {
         selected_category_tag_names_json='[]'
     fi
 
-    if $JQ_CMD --argjson selected_categories "$selected_categories_json" --argjson selected_category_tag_names "$selected_category_tag_names_json" '{
+    if $JQ_CMD --argjson selected_categories "$selected_categories_json" --argjson selected_category_tag_names "$selected_category_tag_names_json" --arg cached_description "$cached_description" '{
         name: (.name // ""),
-        description: (.description // ""),
+        description: (if ((.description // "") | length) > 0 then .description else $cached_description end),
         tags: (
             (
                 if .tags == null then []
@@ -1998,7 +2231,7 @@ write_compact_model_json() {
     echo -e "  ${RED}[FAIL] Failed to build compact JSON for model $model_id${NC}"
     rm -f "$output_tmp"
 
-    if ! printf '{"name":"","description":"","tags":[],"price":5,"categories":[]}\n' > "$output_tmp"; then
+    if ! $JQ_CMD -n --arg description "$cached_description" '{name:"",description:$description,tags:[],price:5,categories:[]}' > "$output_tmp"; then
         abort_no_space "writing fallback compact JSON for model $model_id"
     fi
 
@@ -2135,6 +2368,131 @@ download_model_images() {
     done <<< "$image_data"
 }
 
+
+# ---------------------------------------------------------------------------
+# Whole-model route
+#
+# /download/<id> hands back the entire model in ONE request. Walking
+# files.items[] instead costs 3-4x the requests against the only endpoint that
+# throttles, and request count -- not delay -- is what actually trips the
+# limiter: one library tripped a Cloudflare challenge at model 52 on per-file
+# fetches and then ran 102 models straight through on this route.
+#
+# Returns 0 when a complete archive is sitting at the model root ready for
+# packaging, 1 when the caller should fall back to per-file downloads.
+# ---------------------------------------------------------------------------
+whole_model_archive_path() {
+    printf '%s/__whole_model_%s.zip' "$1" "$2"
+}
+
+# Confirms the fetched archive actually contains every file the API declares.
+# 66 pre-existing archives were missing a file or two versus the current API,
+# so "it downloaded" is not the same as "it is complete".
+whole_model_archive_is_complete() {
+    local archive_path="$1"
+    local source_json="$2"
+    local members=""
+    local expected=""
+    local sanitized=""
+    local missing=0
+
+    if ! command -v unzip >/dev/null 2>&1; then
+        # Without unzip the entry set cannot be read; the archive still
+        # validated, so trust it rather than forcing 3-4x the requests.
+        return 0
+    fi
+
+    members="$(unzip -Z1 "$archive_path" 2>/dev/null)"
+    if [[ -z "$members" ]]; then
+        return 1
+    fi
+
+    # Compare on sanitised leaf names: the archive may carry directory
+    # structure the flat layout will discard later anyway.
+    members="$(printf '%s\n' "$members" | while IFS= read -r member; do
+        [[ -z "$member" ]] && continue
+        [[ "$member" == */ ]] && continue
+        printf '%s\n' "$(sanitize_filename "$(basename "$member")" | tr '[:upper:]' '[:lower:]')"
+    done)"
+
+    while IFS= read -r expected; do
+        [[ -z "$expected" ]] && continue
+        sanitized="$(sanitize_filename "$(trim_field "$expected")" | tr '[:upper:]' '[:lower:]')"
+        [[ -z "$sanitized" ]] && continue
+        if ! printf '%s\n' "$members" | grep -qxF "$sanitized"; then
+            echo -e "  ${YELLOW}[WHOLE] Archive is missing ${expected}; falling back to per-file downloads${NC}"
+            missing=1
+            break
+        fi
+    done < <($JQ_CMD -r '.files.items[]? | .filename // empty' "$source_json" 2>/dev/null)
+
+    [[ "$missing" -eq 0 ]]
+}
+
+try_whole_model_archive() {
+    local model_dir="$1"
+    local model_id="$2"
+    local source_json="$3"
+    local archive_path=""
+    local archive_url=""
+    local app_throttle_attempts=0
+    local archive_size=""
+
+    archive_path="$(whole_model_archive_path "$model_dir" "$model_id")"
+    archive_url="${MMF_BASE_URL}/download/${model_id}"
+
+    rm -f "$archive_path" "${archive_path}.part"
+
+    echo -e "  ${YELLOW}Trying whole-model archive (1 request)...${NC}"
+
+    while true; do
+        if download_file_with_guards "$archive_url" "$archive_path" "application/zip" "fetching whole-model archive for model $model_id" "$(basename "$archive_path")"; then
+            break
+        fi
+
+        # An HTML body here means MMF has no generated archive for this model
+        # -- an ordinary, expected outcome, not a failure worth retrying.
+        if [[ -n "$DOWNLOAD_LAST_TMP_FILE" ]] && [[ -f "$DOWNLOAD_LAST_TMP_FILE" ]] && is_html_error "$DOWNLOAD_LAST_TMP_FILE"; then
+            if ! is_cloudflare_challenge_failure; then
+                echo -e "  ${CYAN}[WHOLE] No whole-model archive available; using per-file downloads${NC}"
+                rm -f "$archive_path" "${archive_path}.part" "$DOWNLOAD_LAST_TMP_FILE"
+                return 1
+            fi
+        fi
+
+        if is_cloudflare_challenge_failure; then
+            rm -f "$archive_path" "${archive_path}.part" "$DOWNLOAD_LAST_TMP_FILE"
+            wait_out_cloudflare_cooldown "fetching whole-model archive for model $model_id"
+            continue
+        fi
+
+        if is_app_throttle_failure && [[ $app_throttle_attempts -lt $MAX_APP_THROTTLE_ATTEMPTS_PER_ITEM ]]; then
+            app_throttle_attempts=$((app_throttle_attempts + 1))
+            rm -f "$archive_path" "${archive_path}.part" "$DOWNLOAD_LAST_TMP_FILE"
+            wait_out_app_throttle "fetching whole-model archive for model $model_id"
+            continue
+        fi
+
+        # Anything else: say so quietly and let the per-file path try, since it
+        # may still succeed for the individual files. Deliberately NOT phrased
+        # as "HTTP 403" -- the desktop app reads that as proof the session died
+        # and would clear a perfectly good saved cookie mid-run.
+        echo -e "  ${CYAN}[WHOLE] No whole-model archive for this model (curl exit ${DOWNLOAD_LAST_CURL_EXIT}, status ${DOWNLOAD_LAST_HTTP_CODE:-unknown}); using per-file downloads${NC}"
+        rm -f "$archive_path" "${archive_path}.part" "$DOWNLOAD_LAST_TMP_FILE"
+        return 1
+    done
+
+    if ! whole_model_archive_is_complete "$archive_path" "$source_json"; then
+        rm -f "$archive_path"
+        return 1
+    fi
+
+    note_adaptive_success
+    archive_size=$(get_file_size "$archive_path")
+    echo -e "  ${GREEN}[WHOLE] Fetched entire model in one request (${archive_size} bytes)${NC}"
+    return 0
+}
+
 compress_non_json_assets() {
     local model_dir="$1"
     local source_json="$2"
@@ -2143,19 +2501,23 @@ compress_non_json_assets() {
     local existing_archive=""
     local archive_name=""
     local archive_path=""
+    local payload_dir=""
     local -a all_files=()
-    local -a rar_7z_files=()
-    local -a files_to_zip=()
+    local -a moved_originals=()
     local file_name=""
     local lower_name=""
+    local sanitized=""
+    local target=""
     local input_bytes=0
+    local payload_bytes=0
     local compression_exit=0
+    local existing_size=""
+    local zip_size=""
 
     archive_base=$(get_model_archive_basename "$source_json" "$model_id")
     existing_archive=$(find_existing_assets_archive "$model_dir" "$archive_base" || true)
 
     if [[ -n "$existing_archive" ]]; then
-        local existing_size
         existing_size=$(get_file_size "$existing_archive")
         echo -e "  ${GREEN}[SKIP] Assets archive already exists: $(basename "$existing_archive") (${existing_size} bytes)${NC}"
         return 0
@@ -2172,68 +2534,131 @@ compress_non_json_assets() {
         return 0
     fi
 
-    if model_root_assets_are_standalone_zips "$model_dir" "$archive_name"; then
-        echo -e "  ${GREEN}[OK] Assets already delivered as standalone ZIP file(s); skipping outer archive wrap${NC}"
-        return 0
-    fi
+    input_bytes=$(sum_compress_input_bytes "$model_dir" "${all_files[@]}")
 
-    for file_name in "${all_files[@]}"; do
-        lower_name=$(printf '%s' "$file_name" | tr '[:upper:]' '[:lower:]')
-        if is_rar_or_7z_name "$lower_name"; then
-            rar_7z_files+=("$file_name")
-        elif [[ "$lower_name" != *.zip ]]; then
-            files_to_zip+=("$file_name")
-        fi
-    done
-
-    if [[ ${#rar_7z_files[@]} -gt 0 ]]; then
-        if ! wrap_rar_7z_archives_individually "$model_dir" "$model_id" "${rar_7z_files[@]}"; then
-            return 1
-        fi
-    fi
-
-    if [[ ${#files_to_zip[@]} -eq 0 ]]; then
-        return 0
-    fi
-
-    input_bytes=$(sum_compress_input_bytes "$model_dir" "${files_to_zip[@]}")
-    if ! ensure_compress_free_space "$model_dir" "creating ZIP archive for model $model_id" "$input_bytes"; then
+    # Expansion stages the payload alongside the sources before the archive is
+    # written, so budget for roughly twice the raw payload.
+    if ! ensure_compress_free_space "$model_dir" "creating ZIP archive for model $model_id" "$((input_bytes * 2))"; then
         abort_no_space "creating ZIP archive for model $model_id"
     fi
 
-    rm -f "$archive_path"
-
-    if resolve_zip_executable >/dev/null 2>&1; then
-        run_zip_compress "$model_dir" "$archive_name" "$input_bytes" "${files_to_zip[@]}"
-        compression_exit=$?
-    else
-        ZIP_COMPRESS_FAILURE="zip executable not found (expected bundled tools/zip.exe or system zip in PATH)"
-        compression_exit=127
+    payload_dir="${model_dir}/.payload"
+    ACTIVE_PAYLOAD_DIR="$payload_dir"
+    ACTIVE_PAYLOAD_MODEL_DIR="$model_dir"
+    PAYLOAD_MOVED_ORIGINALS=()
+    rm -rf "$payload_dir"
+    if ! mkdir -p "$payload_dir"; then
+        echo -e "  ${RED}[FAIL] Could not create staging directory for model $model_id${NC}"
+        return 1
     fi
 
+    PAYLOAD_STORE_NAMES=()
+    PAYLOAD_DEFLATE_NAMES=()
+    EXPANDED_FROM_ZIP_COUNT=0
+
+    for file_name in "${all_files[@]}"; do
+        lower_name=$(printf '%s' "$file_name" | tr '[:upper:]' '[:lower:]')
+
+        if [[ "$lower_name" == *.zip ]]; then
+            # Left in place until the new archive validates -- unzip only reads
+            # it, so there is nothing to roll back if packaging fails.
+            if ! expand_zip_into_payload "${model_dir}/${file_name}" "$payload_dir" 1; then
+                echo -e "  ${RED}[FAIL] Could not expand ${file_name} for model $model_id${NC}"
+                restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
+                return 1
+            fi
+            continue
+        fi
+
+        sanitized=$(sanitize_filename "$file_name")
+        target="$(reserve_payload_name "$sanitized" "$payload_dir")"
+        if ! mv -f "${model_dir}/${file_name}" "${payload_dir}/${target}"; then
+            echo -e "  ${RED}[FAIL] Could not stage ${file_name} for model $model_id${NC}"
+            restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
+            return 1
+        fi
+        moved_originals+=("${target}|${file_name}")
+        PAYLOAD_MOVED_ORIGINALS=("${moved_originals[@]}")
+        PAYLOAD_STORE_NAMES+=("$target")
+    done
+
+    if [[ ${#PAYLOAD_STORE_NAMES[@]} -eq 0 ]] && [[ ${#PAYLOAD_DEFLATE_NAMES[@]} -eq 0 ]]; then
+        echo -e "  ${YELLOW}! Nothing to package for model $model_id after expansion${NC}"
+        rm -rf "$payload_dir"
+        return 1
+    fi
+
+    if [[ "$EXPANDED_FROM_ZIP_COUNT" -gt 0 ]]; then
+        echo -e "  ${CYAN}[ZIP] Expanded ${EXPANDED_FROM_ZIP_COUNT} member(s) out of nested archive(s)${NC}"
+    fi
+
+    payload_bytes=$(sum_payload_bytes "$payload_dir")
+    rm -f "$archive_path"
+
+    if ! resolve_zip_executable >/dev/null 2>&1; then
+        ZIP_COMPRESS_FAILURE="zip executable not found (expected bundled tools/zip.exe or system zip in PATH)"
+        print_archive_failure_report "$archive_path" "zip command failed (exit 127)" "${all_files[@]}"
+        restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
+        return 1
+    fi
+
+    # Pass 1: plain files, stored. Entry sizes then match the declared API
+    # sizes exactly, which is what makes the byte-total check meaningful.
+    if [[ ${#PAYLOAD_STORE_NAMES[@]} -gt 0 ]]; then
+        ZIP_COMPRESS_LEVEL="-0"
+        ZIP_COMPRESS_APPEND=0
+        run_zip_compress "$payload_dir" "$archive_name" "$payload_bytes" "${PAYLOAD_STORE_NAMES[@]}"
+        compression_exit=$?
+    fi
+
+    # Pass 2: anything expanded out of a .zip, deflated back down.
+    if [[ "$compression_exit" -eq 0 ]] && [[ ${#PAYLOAD_DEFLATE_NAMES[@]} -gt 0 ]]; then
+        ZIP_COMPRESS_LEVEL="-6"
+        if [[ ${#PAYLOAD_STORE_NAMES[@]} -gt 0 ]]; then
+            ZIP_COMPRESS_APPEND=1
+        else
+            ZIP_COMPRESS_APPEND=0
+        fi
+        run_zip_compress "$payload_dir" "$archive_name" "$payload_bytes" "${PAYLOAD_DEFLATE_NAMES[@]}"
+        compression_exit=$?
+    fi
+
+    ZIP_COMPRESS_LEVEL="-0"
+    ZIP_COMPRESS_APPEND=0
+
     if [[ "$compression_exit" -ne 0 ]]; then
-        print_archive_failure_report "$archive_path" "zip command failed (exit ${compression_exit})" "${files_to_zip[@]}"
-        rm -f "$archive_path"
-        echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
+        print_archive_failure_report "${payload_dir}/${archive_name}" "zip command failed (exit ${compression_exit})" "${all_files[@]}"
+        rm -f "${payload_dir}/${archive_name}"
+        restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
+        echo -e "  ${RED}[FAIL] Failed to create ${archive_name}${NC}"
+        return 1
+    fi
+
+    if ! mv -f "${payload_dir}/${archive_name}" "$archive_path"; then
+        echo -e "  ${RED}[FAIL] Could not move finished archive into ${model_dir}${NC}"
+        rm -f "${payload_dir}/${archive_name}"
+        restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
         return 1
     fi
 
     if is_valid_archive_file "$archive_path"; then
-        for file_name in "${files_to_zip[@]}"; do
+        # Only now are the sources expendable: the .zip files left in place for
+        # expansion, and the staged copies of everything else.
+        for file_name in "${all_files[@]}"; do
             rm -f "${model_dir}/${file_name}"
         done
-        local zip_size
+        rm -rf "$payload_dir"
+        ACTIVE_PAYLOAD_DIR=""
+        PAYLOAD_MOVED_ORIGINALS=()
         zip_size=$(get_file_size "$archive_path")
         echo -e "  ${GREEN}[OK] Created $(basename "$archive_path") (${zip_size} bytes)${NC}"
         return 0
     fi
 
+    print_archive_failure_report "$archive_path" "archive failed integrity check after zip reported success" "${all_files[@]}"
     rm -f "$archive_path"
-    if [[ -z "$ZIP_VALIDATE_REASON" ]]; then
-        ZIP_VALIDATE_REASON="archive failed integrity check after zip reported success"
-    fi
-    print_archive_failure_report "$archive_path" "integrity validation failed" "${files_to_zip[@]}"
-    echo -e "  ${RED}[FAIL] Failed to create $(basename "$archive_path")${NC}"
+    restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
+    echo -e "  ${RED}[FAIL] Created archive failed validation for model $model_id${NC}"
     return 1
 }
 
@@ -2280,6 +2705,10 @@ fi
 # Create STL downloads directory
 mkdir -p stl_files
 cd stl_files || exit
+# From here on the run owns partial files on disk; make sure Ctrl+C does not
+# leave them behind.
+trap cleanup_on_interrupt INT TERM
+
 cleanup_orphan_part_files
 
 load_model_ids_filter
@@ -2433,15 +2862,15 @@ if [[ "$TEST_MODE" == true ]]; then
                 exit 1
             done
         else
-            is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
+            is_bought=$($JQ_CMD -r 'if has("is_bought") and .is_bought != null then (.is_bought | tostring) else "unknown" end' "$json_file" 2>/dev/null)
             if [[ "$is_bought" == "false" ]]; then
-                echo -e "${YELLOW}! Skipping model $model_id in test mode: object is not in your library (is_bought=false).${NC}"
+                echo -e "${YELLOW}! Model $model_id lists no downloadable files (is_bought=false, which is not an ownership test).${NC}"
             fi
         fi
     done
     
     echo -e "${RED}No downloadable files found for testing${NC}"
-    echo -e "${YELLOW}If the listed models are not owned, this is expected. Use owned models for --test.${NC}"
+    echo -e "${YELLOW}If the listed models genuinely ship no files, this is expected. Pick a model with files for --test.${NC}"
     emit_progress_event "{\"step\":\"test\",\"event\":\"failed\"}"
     exit 1
 fi
@@ -2459,7 +2888,7 @@ consecutive_failures=0
 compact_json_written=0
 zip_created=0
 models_zip_skipped=0
-not_owned_skipped=0
+models_with_zero_files=0
 models_without_file_downloads=0
 
 ASSET_PROGRESS_TOTAL_UNITS=0
@@ -2485,7 +2914,7 @@ for json_file in "${model_json_files[@]}"; do
     emit_asset_progress_model_start "$model_id" "$current_file" "$json_count"
     echo -e "${BLUE}[$current_file/$json_count] Processing model $model_id...${NC}"
 
-    is_bought=$($JQ_CMD -r '.is_bought // "unknown"' "$json_file" 2>/dev/null)
+    is_bought=$($JQ_CMD -r 'if has("is_bought") and .is_bought != null then (.is_bought | tostring) else "unknown" end' "$json_file" 2>/dev/null)
     downloadable_file_count=$($JQ_CMD -r '[.files.items[]? | .download_url | select(. != null and . != "")] | length' "$json_file" 2>/dev/null)
     if [[ ! "$downloadable_file_count" =~ ^[0-9]+$ ]]; then
         downloadable_file_count=0
@@ -2494,13 +2923,11 @@ for json_file in "${model_json_files[@]}"; do
     # Copyright and ownership guard: if no downloadable STL/ZIP URLs exist,
     # do not create any output for this model (no metadata, no images).
     if [[ "$downloadable_file_count" -eq 0 ]]; then
+        models_with_zero_files=$((models_with_zero_files + 1))
         if [[ "$is_bought" == "false" ]]; then
-            not_owned_skipped=$((not_owned_skipped + 1))
-            models_without_file_downloads=$((models_without_file_downloads + 1))
-            echo -e "${YELLOW}  ! Object is not in your library (is_bought=false). Skipping model output for model $model_id.${NC}"
+            echo -e "${YELLOW}  ! Model $model_id lists no downloadable files. (is_bought=false does not mean you lack access — subscription and gifted models report false too.)${NC}"
         else
-            models_without_file_downloads=$((models_without_file_downloads + 1))
-            echo -e "${YELLOW}  ! No downloadable STL/ZIP URLs found in metadata. Skipping model output.${NC}"
+            echo -e "${YELLOW}  ! Model $model_id lists no downloadable files. Nothing to download.${NC}"
         fi
         emit_asset_progress_unit "$model_id" "model" "skipped"
         emit_asset_progress_model_done "$model_id"
@@ -2509,13 +2936,16 @@ for json_file in "${model_json_files[@]}"; do
     fi
 
     # Create directory for this model (readable name; falls back to legacy model_<id> if present)
-    model_dir=$(resolve_model_dir "$model_id" "$json_file")
+    final_model_dir=$(resolve_model_dir "$model_id" "$json_file")
+    model_dir=$(prepare_model_staging_dir "$final_model_dir")
+    ACTIVE_STAGING_DIR="$model_dir"
     mkdir -p "$model_dir"
-    if [[ "$model_dir" != "model_${model_id}" ]]; then
-        echo -e "  ${CYAN}Using folder: ${model_dir}/${NC}"
+    if [[ "$final_model_dir" != "model_${model_id}" ]]; then
+        echo -e "  ${CYAN}Using folder: ${final_model_dir}/${NC}"
     fi
     model_file_successful_downloads=0
     model_assets_complete=0
+    whole_model_ok=0
     existing_assets_archive=""
 
     if model_assets_already_archived "$model_dir" "$json_file" "$model_id"; then
@@ -2548,6 +2978,21 @@ for json_file in "${model_json_files[@]}"; do
             abort_no_space "before downloading files for model $model_id"
         fi
 
+        whole_model_ok=0
+        if [[ "$WHOLE_MODEL_ROUTE" == "1" ]] && try_whole_model_archive "$model_dir" "$model_id" "$json_file"; then
+            whole_model_ok=1
+            total_downloads=$((total_downloads + 1))
+            successful_downloads=$((successful_downloads + 1))
+            model_file_successful_downloads=$downloadable_file_count
+            consecutive_failures=0
+            whole_model_unit=0
+            while [[ "$whole_model_unit" -lt "$downloadable_file_count" ]]; do
+                emit_asset_progress_unit "$model_id" "file" "downloaded"
+                whole_model_unit=$((whole_model_unit + 1))
+            done
+            adaptive_sleep
+        fi
+
         reserved_model_output_names=""
         model_sanitized_name_collisions=0
         if model_has_sanitized_filename_collisions "$download_data"; then
@@ -2555,6 +3000,10 @@ for json_file in "${model_json_files[@]}"; do
         fi
 
         while IFS='|' read -r filename download_url file_size_meta; do
+            if [[ "$whole_model_ok" -eq 1 ]]; then
+                break
+            fi
+
             if [[ -z "$filename" ]]; then
                 continue
             fi
@@ -2628,6 +3077,7 @@ for json_file in "${model_json_files[@]}"; do
                     successful_downloads=$((successful_downloads + 1))
                     model_file_successful_downloads=$((model_file_successful_downloads + 1))
                     consecutive_failures=0
+                    note_adaptive_success
                     emit_asset_progress_unit "$model_id" "file" "downloaded"
                     break
                 fi
@@ -2652,7 +3102,7 @@ for json_file in "${model_json_files[@]}"; do
                         exit 1
                     fi
 
-                    sleep "$STL_FILE_DELAY_SEC"
+                    adaptive_sleep
                     continue 2
                 fi
 
@@ -2715,7 +3165,7 @@ for json_file in "${model_json_files[@]}"; do
                 break
             done
 
-            sleep "$STL_FILE_DELAY_SEC"
+            adaptive_sleep
         done <<< "$download_data"
     fi
 
@@ -2751,10 +3201,21 @@ for json_file in "${model_json_files[@]}"; do
         emit_asset_progress_unit "$model_id" "zip" "failed"
     fi
 
+    # Only now does the model become visible to anything walking the library.
+    if ! finalize_model_staging_dir "$model_dir" "$final_model_dir"; then
+        emit_asset_progress_unit "$model_id" "model" "failed"
+        emit_asset_progress_model_done "$model_id"
+        echo ""
+        continue
+    fi
+    ACTIVE_STAGING_DIR=""
+
     emit_asset_progress_unit "$model_id" "model" "completed"
     emit_asset_progress_model_done "$model_id"
     echo ""
 done
+
+rmdir "$STAGING_ROOT" 2>/dev/null || true
 
 emit_progress_event "{\"step\":\"assets\",\"event\":\"done\",\"totalModels\":$json_count,\"workTotal\":$ASSET_PROGRESS_TOTAL_UNITS,\"workDone\":$ASSET_PROGRESS_TOTAL_UNITS,\"modelsDone\":$ASSET_PROGRESS_MODELS_DONE}"
 
@@ -2765,11 +3226,11 @@ echo -e "${GREEN}Successful downloads: $successful_downloads/$total_downloads fi
 if [[ $((total_downloads - successful_downloads)) -gt 0 ]]; then
     echo -e "${YELLOW}Failed downloads: $((total_downloads - successful_downloads))${NC}"
 fi
-if [[ "$not_owned_skipped" -gt 0 ]]; then
-    echo -e "${YELLOW}Skipped models not owned: $not_owned_skipped${NC}"
+if [[ "$models_with_zero_files" -gt 0 ]]; then
+    echo -e "${CYAN}Models listing no downloadable files (normal — renders/licences): $models_with_zero_files${NC}"
 fi
 if [[ "$models_without_file_downloads" -gt 0 ]]; then
-    echo -e "${YELLOW}Skipped model outputs with zero downloaded files: $models_without_file_downloads${NC}"
+    echo -e "${YELLOW}Models whose files could not be downloaded: $models_without_file_downloads${NC}"
 fi
 if [[ "$models_zip_skipped" -gt 0 ]]; then
     echo -e "${GREEN}Models skipped (assets ZIP already present): $models_zip_skipped${NC}"

@@ -1307,6 +1307,20 @@ function handlePipelineProgressEvent(event) {
         return true;
     }
 
+    if (step === "pacing") {
+        // The gap between download requests is adaptive: a pace that is fine
+        // one day is throttled the next, so surface the current value rather
+        // than leaving an unattended run looking stalled.
+        const delaySec = coerceProgressInteger(event.delaySec, 0);
+        if (delaySec > 0) {
+            pipelineProgressState.detail = eventName === "widened"
+                ? `Throttled — slowing to ${delaySec}s between downloads. This is automatic; no action needed.`
+                : `Running clean — speeding up to ${delaySec}s between downloads.`;
+            renderPipelineProgressUi();
+        }
+        return true;
+    }
+
     if (step === "test") {
         pipelineProgressState.visible = true;
         pipelineProgressState.phase = "step2-test";
