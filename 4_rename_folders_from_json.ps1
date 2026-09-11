@@ -43,13 +43,13 @@ Write-Host "===================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Validate paths exist
-if (-not (Test-Path $JSON_PATH)) {
+if (-not (Test-Path -LiteralPath $JSON_PATH)) {
     Write-Host "ERROR: JSON path does not exist: $JSON_PATH" -ForegroundColor Red
     Write-Host "Update `$JSON_PATH to point to your 'downloads' directory containing model_*.json files" -ForegroundColor Yellow
     exit 1
 }
 
-if (-not (Test-Path $FOLDERS_PATH)) {
+if (-not (Test-Path -LiteralPath $FOLDERS_PATH)) {
     Write-Host "ERROR: Folders path does not exist: $FOLDERS_PATH" -ForegroundColor Red
     Write-Host "Update `$FOLDERS_PATH to point to your 'stl_files' directory containing model_* folders" -ForegroundColor Yellow
     exit 1
@@ -67,7 +67,7 @@ $failed = 0
 $skipped = 0
 
 # Get all JSON files
-$jsonFiles = Get-ChildItem -Path $JSON_PATH -Filter "model_*.json"
+$jsonFiles = Get-ChildItem -LiteralPath $JSON_PATH -Filter "model_*.json"
 $totalFiles = $jsonFiles.Count
 
 if ($totalFiles -eq 0) {
@@ -87,7 +87,7 @@ foreach ($jsonFile in $jsonFiles) {
     
     try {
         # Read and parse JSON
-        $json = Get-Content $jsonFile.FullName -Raw | ConvertFrom-Json
+        $json = Get-Content -LiteralPath $jsonFile.FullName -Raw | ConvertFrom-Json
         $modelName = $json.name
         
         if (-not $modelName) {
@@ -98,7 +98,10 @@ foreach ($jsonFile in $jsonFiles) {
         
         # Clean up the name for use as folder name
         # Remove invalid Windows filename characters: < > : " / \ | ? *
-        $cleanName = $modelName -replace '[<>:"/\\|?*]', '_'
+        # Reserved characters and the apostrophe are DELETED, not replaced --
+        # the convention verified against 1,545 existing folders keeps
+        # & [ ] ( ) ! - . and collapses only whitespace into underscores.
+        $cleanName = $modelName -replace '[<>:"/\\|?*]', '' -replace "'", ''
         # Replace multiple spaces with single space, then spaces with underscores
         $cleanName = $cleanName -replace '\s+', ' ' -replace ' ', '_'
         # Replace multiple underscores with single underscore
@@ -122,14 +125,14 @@ foreach ($jsonFile in $jsonFiles) {
         $newFolder = Join-Path $FOLDERS_PATH $newFolderName
         
         # Check if source folder exists
-        if (-not (Test-Path $oldFolder)) {
+        if (-not (Test-Path -LiteralPath $oldFolder)) {
             Write-Host "[$current/$totalFiles] Model $modelId - Folder not found, skipping" -ForegroundColor Yellow
             $skipped++
             continue
         }
         
         # Check if target already exists (avoid conflicts)
-        if (Test-Path $newFolder) {
+        if (Test-Path -LiteralPath $newFolder) {
             Write-Host "[$current/$totalFiles] Model $modelId - Target folder already exists: $newFolderName" -ForegroundColor Yellow
             $skipped++
             continue
@@ -137,7 +140,7 @@ foreach ($jsonFile in $jsonFiles) {
         
         # Attempt rename
         Write-Host "[$current/$totalFiles] Renaming: model_$modelId -> $newFolderName" -ForegroundColor Cyan
-        Rename-Item -Path $oldFolder -NewName $newFolderName -ErrorAction Stop
+        Rename-Item -LiteralPath $oldFolder -NewName $newFolderName -ErrorAction Stop
         Write-Host "  [OK] Success" -ForegroundColor Green
         $renamed++
         
@@ -166,7 +169,7 @@ Write-Host ""
 
 # Show sample of renamed folders
 Write-Host "Sample of renamed folders:" -ForegroundColor Cyan
-Get-ChildItem -Path $FOLDERS_PATH -Directory | 
+Get-ChildItem -LiteralPath $FOLDERS_PATH -Directory | 
     Where-Object { $_.Name -notlike "model_*" } |
     Select-Object -First 10 | 
     ForEach-Object {

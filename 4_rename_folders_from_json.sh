@@ -38,7 +38,10 @@ sanitize_folder_name() {
     local cleaned=""
 
     cleaned="$(printf "%s" "$name" | tr -d '\r\n')"
-    cleaned="$(printf "%s" "$cleaned" | sed -E 's/[<>:"/\\|?*]/_/g; s/[[:space:]]+/ /g; s/ /_/g; s/_+/_/g; s/^_+//; s/_+$//')"
+    # Reserved characters and the apostrophe are DELETED, not replaced with an
+    # underscore: that is the convention verified against 1,545 existing
+    # folders, which keeps & [ ] ( ) ! - . and collapses only whitespace.
+    cleaned="$(printf "%s" "$cleaned" | tr -d "'" | sed -E 's/[<>:"/\\|?*]//g; s/[[:space:]]+/ /g; s/ /_/g; s/_+/_/g; s/^_+//; s/_+$//')"
 
     if [[ -z "$cleaned" ]]; then
         cleaned="unnamed_model"

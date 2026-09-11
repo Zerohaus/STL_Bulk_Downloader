@@ -37,14 +37,14 @@ Write-Host "=================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Validate base path exists
-if (-not (Test-Path $BASE_PATH)) {
+if (-not (Test-Path -LiteralPath $BASE_PATH)) {
     Write-Host "ERROR: Base path does not exist: $BASE_PATH" -ForegroundColor Red
     Write-Host "Please update the `$BASE_PATH variable in this script to point to your stl_files directory" -ForegroundColor Yellow
     exit 1
 }
 
 # Navigate to base directory
-Set-Location $BASE_PATH
+Set-Location -LiteralPath $BASE_PATH
 
 # Find all ZIP files recursively
 $zipFiles = Get-ChildItem -Recurse -Filter "*.zip"
@@ -102,8 +102,8 @@ function Expand-ZipSafely {
 
             $destinationFile = Join-Path $Destination ($entry.FullName -replace '\\', '/')
             $destinationDir = Split-Path $destinationFile -Parent
-            if (-not (Test-Path $destinationDir)) {
-                New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+            if (-not (Test-Path -LiteralPath $destinationDir)) {
+                New-Item -ItemType Directory -LiteralPath $destinationDir -Force | Out-Null
             }
 
             [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destinationFile, $true)
@@ -133,8 +133,8 @@ foreach ($zip in $zipFiles) {
             $destination = Join-Path $zip.DirectoryName $extractFolderName
             
             # Create extraction directory if it doesn't exist
-            if (-not (Test-Path $destination)) {
-                New-Item -ItemType Directory -Path $destination -Force | Out-Null
+            if (-not (Test-Path -LiteralPath $destination)) {
+                New-Item -ItemType Directory -LiteralPath $destination -Force | Out-Null
             }
         }
         
@@ -161,7 +161,7 @@ Write-Host ""
 # Optionally show summary of what was extracted
 Write-Host "Sample of extracted directories:" -ForegroundColor Cyan
 Get-ChildItem -Directory | Select-Object -First 5 | ForEach-Object {
-    $fileCount = (Get-ChildItem $_.FullName -Recurse -File | Measure-Object).Count
+    $fileCount = (Get-ChildItem -LiteralPath $_.FullName -Recurse -File | Measure-Object).Count
     Write-Host "  $($_.Name): $fileCount files" -ForegroundColor Gray
 }
 
