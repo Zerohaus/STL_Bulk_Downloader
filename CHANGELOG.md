@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.2] — 2026-09-11
+
+### Fixed
+- Flat archives were picking up **macOS resource forks as fake model files**.
+  Creators who zip on macOS ship a parallel `__MACOSX/._filename` tree; the old
+  nested layout hid it inside the creator's own `.zip`, but flattening exposed
+  it, and sanitising strips the leading `._` so it collided with the real name
+  and was saved as `<name>_1.stl`. A 178-byte metadata blob sat next to an 8 MB
+  mesh looking like a legitimate file — on a live run, roughly half of every
+  archive's entries were junk. Expansion now skips `__MACOSX/`, any `._` file,
+  and `.DS_Store` / `Thumbs.db` / `desktop.ini`.
+
 ## [2.0.1] — 2026-09-11
 
 ### Fixed
