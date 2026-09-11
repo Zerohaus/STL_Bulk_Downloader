@@ -119,3 +119,35 @@ Note: macOS artifacts must be built on a macOS machine.
 - Electron main process: `electron/main.js`
 - Preload bridge: `electron/preload.js`
 - UI renderer: `gui/index.html`, `gui/app.js`, `gui/styles.css`
+
+## Building on Windows without Developer Mode
+
+`npm run dist:win` may fail while unpacking electron-builder's code-signing
+toolchain:
+
+```
+ERROR: Cannot create symbolic link : A required privilege is not held by the
+client. : ...\winCodeSign\<id>\darwin\10.12\lib\libcrypto.dylib
+```
+
+That archive contains macOS symlinks, and creating a symlink on Windows needs
+elevated rights. The two files are macOS libraries and play no part in a
+Windows build, but the failed extraction aborts the build.
+
+Two ways round it:
+
+- **Enable Developer Mode** (Settings → Privacy & security → For developers).
+  This grants symlink privileges and is the proper fix — `npm run dist:win`
+  then works unchanged.
+- **Skip executable editing** for a one-off build:
+
+  ```
+  npx electron-builder --win nsis portable -c.win.signAndEditExecutable=false
+  ```
+
+  The installers build, but the bundled app executable keeps Electron's default
+  icon and version metadata, because that step is what stamps them. The NSIS
+  installer's own icon comes from `nsis.installerIcon` and is unaffected.
+
+Neither path code-signs anything — there is no certificate in this repo — so
+SmartScreen will warn on first run either way.
