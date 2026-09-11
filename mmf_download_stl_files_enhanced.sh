@@ -1360,29 +1360,78 @@ cleanup_orphan_part_files() {
 
 # Map Greek/Cyrillic lookalike letters to Latin (common in MMF Roman-numeral filenames).
 # Requires perl (bundled with Git for Windows at usr/bin/perl; usually present on macOS/Linux too).
+
+# Map Greek/Cyrillic lookalike letters to Latin (common in MMF Roman-numeral
+# filenames). Pure parameter expansion: this used to shell out to perl, but it
+# sits on a path that now runs once per archive member and a single subshell
+# costs ~24 ms on Windows.
 normalize_unicode_homoglyphs() {
-    local input="$1"
-
-    if command -v perl >/dev/null 2>&1; then
-        printf '%s' "$input" | perl -CS -pe 'tr/\x{0399}\x{03B9}\x{0406}\x{0456}\x{0410}\x{0430}\x{0412}\x{0432}\x{0415}\x{0435}\x{041E}\x{043E}\x{0420}\x{0440}\x{0421}\x{0441}\x{0422}\x{0442}\x{0423}\x{0443}\x{0425}\x{0445}/IiIiAaVvEeOoRrSsTtUuXx/'
-        return
-    fi
-
-    printf '%s' "$input"
+    local out=""
+    _fold_homoglyphs "$1" out
+    printf '%s' "$out"
 }
 
-sanitize_filename() {
-    local original_name="$1"
-    local sanitized_name
-    local base_name
-    local extension=""
+_fold_homoglyphs() {
+    local __h="$1"
 
-    sanitized_name=$(printf "%s" "$original_name" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')
-    sanitized_name="$(trim_field "$sanitized_name")"
-    sanitized_name="$(normalize_unicode_homoglyphs "$sanitized_name")"
-    sanitized_name=$(printf "%s" "$sanitized_name" | sed -E "s/[<>:\"/\\|?*]//g; s/'//g; s/[[:space:]]+/ /g")
-    sanitized_name="${sanitized_name// /_}"
-    sanitized_name=$(printf "%s" "$sanitized_name" | sed -E 's/_+/_/g')
+    __h="${__h//$'Ι'/I}"; __h="${__h//$'ι'/i}"
+    __h="${__h//$'І'/I}"; __h="${__h//$'і'/i}"
+    __h="${__h//$'А'/A}"; __h="${__h//$'а'/a}"
+    __h="${__h//$'В'/V}"; __h="${__h//$'в'/v}"
+    __h="${__h//$'Е'/E}"; __h="${__h//$'е'/e}"
+    __h="${__h//$'О'/O}"; __h="${__h//$'о'/o}"
+    __h="${__h//$'Р'/R}"; __h="${__h//$'р'/r}"
+    __h="${__h//$'С'/S}"; __h="${__h//$'с'/s}"
+    __h="${__h//$'Т'/T}"; __h="${__h//$'т'/t}"
+    __h="${__h//$'У'/U}"; __h="${__h//$'у'/u}"
+    __h="${__h//$'Х'/X}"; __h="${__h//$'х'/x}"
+
+    printf -v "$2" '%s' "$__h"
+}
+
+# Shared front half of both sanitisers: strip control characters, fold
+# homoglyphs, DELETE the Windows-reserved set and the apostrophe, collapse
+# whitespace runs into single underscores.
+#
+# Writes to the caller's variable instead of printing so no subshell is forked.
+# The internal name is deliberately obscure: bash is dynamically scoped, so a
+# plain "local s" here would shadow a caller that passed "s" as the out-param
+# and silently hand back an empty string.
+_sanitize_core() {
+    local __san="$1"
+
+    # Tabs/newlines/CRs become spaces at the whitespace-collapse step below;
+    # every other control character is removed outright.
+    __san="${__san//$'\t'/ }"; __san="${__san//$'\n'/ }"; __san="${__san//$'\r'/ }"
+    __san="${__san//[[:cntrl:]]/}"
+
+    while [[ "$__san" == [[:space:]]* ]]; do __san="${__san#?}"; done
+    while [[ "$__san" == *[[:space:]] ]]; do __san="${__san%?}"; done
+
+    _fold_homoglyphs "$__san" __san
+
+    # The backslash is handled separately and deliberately: inside a bash
+    # bracket expression "\" is the escape character, not a member of the set,
+    # so '[<>:"/\|?*]' silently means "... or an escaped pipe" and leaves every
+    # backslash in the name untouched. sed's bracket expressions treat it as a
+    # literal, which is why the old pipeline did strip it.
+    local reserved='[<>:"/|?*]'
+    __san="${__san//$reserved/}"
+    __san="${__san//\\/}"
+    __san="${__san//\'/}"
+
+    while [[ "$__san" == *"  "* ]]; do __san="${__san//  / }"; done
+    __san="${__san// /_}"
+    while [[ "$__san" == *"__"* ]]; do __san="${__san//__/_}"; done
+
+    printf -v "$2" '%s' "$__san"
+}
+
+
+sanitize_filename() {
+    local sanitized_name="" base_name="" extension=""
+
+    _sanitize_core "$1" sanitized_name
 
     if [[ "$sanitized_name" == *.* ]] && [[ "$sanitized_name" != .* ]]; then
         base_name="${sanitized_name%.*}"
@@ -1391,8 +1440,11 @@ sanitize_filename() {
         base_name="$sanitized_name"
     fi
 
-    base_name=$(printf "%s" "$base_name" | sed -E 's/[. ]+$//; s/^[_.]+//; s/[_.]+$//; s/_+/_/g')
-    extension=$(printf "%s" "$extension" | sed -E 's/[. ]+$//')
+    while [[ "$base_name" == *[.\ ] ]]; do base_name="${base_name%?}"; done
+    while [[ "$base_name" == [_.]* ]]; do base_name="${base_name#?}"; done
+    while [[ "$base_name" == *[_.] ]]; do base_name="${base_name%?}"; done
+    while [[ "$base_name" == *"__"* ]]; do base_name="${base_name//__/_}"; done
+    while [[ "$extension" == *[.\ ] ]]; do extension="${extension%?}"; done
 
     if [[ -z "$base_name" ]]; then
         if [[ -n "$extension" ]]; then
@@ -1404,9 +1456,9 @@ sanitize_filename() {
         sanitized_name="${base_name}${extension}"
     fi
 
-    sanitized_name=$(printf "%s" "$sanitized_name" | sed -E 's/[. ]+$//')
+    while [[ "$sanitized_name" == *[.\ ] ]]; do sanitized_name="${sanitized_name%?}"; done
 
-    if [[ "$sanitized_name" =~ ^_+$ ]]; then
+    if [[ -n "$sanitized_name" ]] && [[ -z "${sanitized_name//_/}" ]]; then
         sanitized_name="unnamed_file"
     fi
 
@@ -1434,16 +1486,15 @@ elif [[ "$MAX_FOLDER_NAME_LENGTH" -gt 160 ]]; then
     MAX_FOLDER_NAME_LENGTH=160
 fi
 
+
 sanitize_folder_name() {
-    local name="$1"
     local cleaned=""
 
-    cleaned="$(printf "%s" "$name" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
-    cleaned="$(trim_field "$cleaned")"
-    cleaned="$(normalize_unicode_homoglyphs "$cleaned")"
-    cleaned="$(printf "%s" "$cleaned" | sed -E "s/[<>:\"/\\|?*]//g; s/'//g; s/[[:space:]]+/ /g")"
-    cleaned="${cleaned// /_}"
-    cleaned="$(printf "%s" "$cleaned" | sed -E 's/_+/_/g; s/[. ]+$//; s/^[_.]+//; s/[_.]+$//')"
+    _sanitize_core "$1" cleaned
+
+    while [[ "$cleaned" == *[.\ ] ]]; do cleaned="${cleaned%?}"; done
+    while [[ "$cleaned" == [_.]* ]]; do cleaned="${cleaned#?}"; done
+    while [[ "$cleaned" == *[_.] ]]; do cleaned="${cleaned%?}"; done
 
     if [[ -z "$cleaned" ]]; then
         cleaned="unnamed_model"
@@ -1451,14 +1502,14 @@ sanitize_folder_name() {
 
     if [[ ${#cleaned} -gt $MAX_FOLDER_NAME_LENGTH ]]; then
         cleaned="${cleaned:0:$MAX_FOLDER_NAME_LENGTH}"
-        cleaned="$(printf "%s" "$cleaned" | sed -E 's/_+$//')"
+        while [[ "$cleaned" == *_ ]]; do cleaned="${cleaned%?}"; done
     fi
 
     if [[ -z "$cleaned" ]]; then
         cleaned="unnamed_model"
     fi
 
-    if [[ "$cleaned" =~ ^_+$ ]]; then
+    if [[ -n "$cleaned" ]] && [[ -z "${cleaned//_/}" ]]; then
         cleaned="unnamed_model"
     fi
 
