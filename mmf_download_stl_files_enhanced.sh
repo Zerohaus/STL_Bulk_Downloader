@@ -92,6 +92,10 @@ MMF_BASE_URL="${MMF_BASE_URL:-https://www.myminifactory.com}"
 MIN_FREE_SPACE_MB="${MMF_MIN_FREE_SPACE_MB:-2048}"
 DISK_MARGIN_MB_PER_FILE="${MMF_DISK_MARGIN_MB_PER_FILE:-512}"
 DISK_MARGIN_MB_MODEL="${MMF_DISK_MARGIN_MB_MODEL:-1024}"
+# Pre-flight estimate for a file whose metadata declares no size. Only used to
+# sanity-check free space before a model starts; ensure_file_download_space
+# re-checks against the real figure before every individual file.
+UNKNOWN_FILE_ESTIMATE_MB="${MMF_UNKNOWN_FILE_ESTIMATE_MB:-64}"
 ZIP32_LIMIT_BYTES=4294967295
 ZIP64_RETRY_BYTES=3500000000
 # curl's own --retry treats HTTP 429/500/502/503/504 as transient and retries
@@ -325,6 +329,10 @@ fi
 
 if [[ ! "$DISK_MARGIN_MB_MODEL" =~ ^[0-9]+$ ]]; then
     DISK_MARGIN_MB_MODEL=1024
+fi
+
+if [[ ! "$UNKNOWN_FILE_ESTIMATE_MB" =~ ^[0-9]+$ ]] || [[ "$UNKNOWN_FILE_ESTIMATE_MB" -eq 0 ]]; then
+    UNKNOWN_FILE_ESTIMATE_MB=64
 fi
 
 if [[ ! "$CURL_RETRIES" =~ ^[0-9]+$ ]]; then
@@ -793,14 +801,17 @@ ensure_model_download_plan() {
                 required_mb=$(( (estimated_total_bytes + 1024 * 1024 - 1) / 1024 / 1024 + DISK_MARGIN_MB_MODEL ))
                 echo -e "  ${CYAN}[DISK] Model $model_id — $unknown_count file(s) without size; estimated +$(format_bytes_human "$estimated_unknown_bytes") from average of known sizes${NC}"
             else
-                echo -e "  ${CYAN}[DISK] Model $model_id — $unknown_count file(s) without size; using ${MIN_FREE_SPACE_MB} MB minimum each${NC}"
-                required_mb=$((required_mb + unknown_count * MIN_FREE_SPACE_MB))
+                echo -e "  ${CYAN}[DISK] Model $model_id — $unknown_count file(s) without size; estimating ${UNKNOWN_FILE_ESTIMATE_MB} MB each${NC}"
+                required_mb=$((required_mb + unknown_count * UNKNOWN_FILE_ESTIMATE_MB))
             fi
         fi
     else
-        echo -e "  ${YELLOW}[DISK] Model $model_id — no file sizes in metadata; using ${MIN_FREE_SPACE_MB} MB minimum per file ($file_count file(s))${NC}"
+        echo -e "  ${YELLOW}[DISK] Model $model_id — no file sizes in metadata; estimating ${UNKNOWN_FILE_ESTIMATE_MB} MB per file ($file_count file(s))${NC}"
         if [[ "$file_count" -gt 0 ]]; then
-            required_mb=$((MIN_FREE_SPACE_MB * file_count))
+            required_mb=$((UNKNOWN_FILE_ESTIMATE_MB * file_count + DISK_MARGIN_MB_MODEL))
+            if (( required_mb < MIN_FREE_SPACE_MB )); then
+                required_mb=$MIN_FREE_SPACE_MB
+            fi
         fi
     fi
 
@@ -1271,9 +1282,11 @@ PAYLOAD_MOVED_ORIGINALS=()
 # Hands back a directory to build this model in. Any work a previous run left
 # behind -- whether it was interrupted in staging or had already been moved
 # into place -- is adopted so resume stays free.
+
 prepare_model_staging_dir() {
-    local final_dir="$1"
-    local staging="${STAGING_ROOT}/$(basename "$final_dir")"
+    local model_id="$1"
+    local final_dir="$2"
+    local staging="${STAGING_ROOT}/${model_id}"
 
     mkdir -p "$STAGING_ROOT" 2>/dev/null || true
 
@@ -2542,7 +2555,7 @@ compress_non_json_assets() {
         abort_no_space "creating ZIP archive for model $model_id"
     fi
 
-    payload_dir="${model_dir}/.payload"
+    payload_dir="${model_dir}/.p"
     ACTIVE_PAYLOAD_DIR="$payload_dir"
     ACTIVE_PAYLOAD_MODEL_DIR="$model_dir"
     PAYLOAD_MOVED_ORIGINALS=()
@@ -2937,7 +2950,7 @@ for json_file in "${model_json_files[@]}"; do
 
     # Create directory for this model (readable name; falls back to legacy model_<id> if present)
     final_model_dir=$(resolve_model_dir "$model_id" "$json_file")
-    model_dir=$(prepare_model_staging_dir "$final_model_dir")
+    model_dir=$(prepare_model_staging_dir "$model_id" "$final_model_dir")
     ACTIVE_STAGING_DIR="$model_dir"
     mkdir -p "$model_dir"
     if [[ "$final_model_dir" != "model_${model_id}" ]]; then
@@ -2974,10 +2987,6 @@ for json_file in "${model_json_files[@]}"; do
         echo ""
         continue
     elif [[ "$model_assets_complete" -eq 0 ]]; then
-        if ! ensure_model_download_plan "$json_file" "$model_id" "$model_dir"; then
-            abort_no_space "before downloading files for model $model_id"
-        fi
-
         whole_model_ok=0
         if [[ "$WHOLE_MODEL_ROUTE" == "1" ]] && try_whole_model_archive "$model_dir" "$model_id" "$json_file"; then
             whole_model_ok=1
@@ -2991,6 +3000,14 @@ for json_file in "${model_json_files[@]}"; do
                 whole_model_unit=$((whole_model_unit + 1))
             done
             adaptive_sleep
+        fi
+
+        # Only budget for per-file downloads if that is actually what we are
+        # about to do. The plan assumes a 2 GB minimum for every file with no
+        # declared size, which a model with many null sizes turns into a
+        # demand for hundreds of GB that the whole-model route never needs.
+        if [[ "$whole_model_ok" -eq 0 ]] && ! ensure_model_download_plan "$json_file" "$model_id" "$model_dir"; then
+            abort_no_space "before downloading files for model $model_id"
         fi
 
         reserved_model_output_names=""
