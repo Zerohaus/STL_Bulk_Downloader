@@ -1,5 +1,92 @@
 # Changelog
 
+## [2.0.0] — 2026-09-11
+
+Applies the findings from two full-library pulls (413 models, 175 GB, zero failed
+downloads) recorded in `_tools/MMF_DOWNLOADER_FINDINGS.md`. **The on-disk archive
+layout changes** — see *Breaking* below.
+
+### Added
+- **Whole-model download route.** Step 2 now tries `GET /download/<id>` first,
+  which returns an entire model in **one request**, and only falls back to
+  walking `files.items[]` when no generated archive exists. Request count — not
+  delay — is what trips MyMiniFactory's limiter: one library tripped a Cloudflare
+  challenge at model 52 on per-file fetches, then ran 102 models straight through
+  on this route. Per-file fetching costs 3–4× the requests against the only
+  endpoint that throttles. Disable with `MMF_WHOLE_MODEL_ROUTE=0`.
+- The fetched whole-model archive is **verified against the API's file list**
+  before it is trusted; a missing entry falls back to per-file downloads rather
+  than shipping an incomplete model. (66 pre-existing archives were found to be
+  missing a file or two versus the current API.)
+- **Adaptive pacing.** `MMF_STL_FILE_DELAY_SEC` is now a floor, not a fixed rate.
+  The live gap widens ×1.8 (capped, default 120 s) on every app-level throttle or
+  Cloudflare cooldown, and narrows again only after a run of clean downloads. The
+  limiter is not a published quota — one run needed ~68 s between requests while
+  another did 233 models at a flat 12 s with zero throttles, so no hard-coded
+  rate survives both. Tunable via `MMF_ADAPTIVE_DELAY_MAX_SEC`,
+  `MMF_ADAPTIVE_WIDEN_PCT`, `MMF_ADAPTIVE_NARROW_PCT`,
+  `MMF_ADAPTIVE_RECOVERY_STREAK`; disable with `MMF_ADAPTIVE_PACING=0`.
+  The pipeline progress panel shows the current gap as it changes.
+- **Stage, then move.** Each model is assembled under `.mmf_staging/` and renamed
+  into the library only once its archive exists, so nothing walking the library
+  ever sees a half-built model folder. Interrupted work stays in `.mmf_staging/`
+  and is adopted by the next run, so resume remains free.
+- **Interrupt cleanup.** Ctrl+C now runs a handler that puts staged files back
+  and removes `.part` files instead of leaving them behind. A long run gets
+  killed at least once.
+
+### Breaking
+- **Archive layout.** A model is now packaged as a single flat `<Slug>.zip`
+  containing every file in `files.items`, with **nested `.zip` members expanded
+  rather than nested** (expansion recurses; observed nesting runs two deep) and
+  every member name sanitised. This replaces the previous layout, which left
+  MMF-delivered `.zip` files standalone and wrapped each `.rar`/`.7z` in its own
+  `.zip`. Existing folders are not rewritten — only newly downloaded models use
+  the new layout.
+- **Compression is now per-entry, not uniform.** Plain files are `STORED` so
+  entry sizes still match the API's declared sizes exactly; anything expanded out
+  of a `.zip` is `DEFLATED`, because storing already-compressed content raw
+  inflated one 1,041 MB model to 1,852 MB.
+- **Name sanitising deletes rather than substitutes.** `< > : " / \ | ? *` and
+  the apostrophe are removed instead of becoming `_`; `& [ ] ( ) ! - .` are kept
+  and whitespace runs still collapse to a single `_`. This matches the convention
+  verified against 1,545 pre-existing folders. `4_rename_folders_from_json.sh`
+  and `.ps1` were aligned to the same rule. Folders created by earlier versions
+  are still found (a model id is matched against existing directories before a
+  new name is minted), so an existing library is not duplicated.
+
+### Fixed
+- **`is_bought` is no longer described as an ownership test.** It is `false` for
+  models the account can freely download — subscription and gift access never set
+  it — so reporting "not in your library" was wrong. It is now reported as
+  metadata only, and never gates a download.
+- `is_bought` was also being read as `"unknown"` whenever it was genuinely
+  `false`: jq's `//` operator treats `false` as absent, so `.is_bought // "unknown"`
+  can never return `false` and the branch handling it was unreachable. Read with
+  an explicit `has()` test instead.
+- **Listings with zero files are no longer counted as failures.** Objects with
+  images and a price but no downloadable files are ordinary (marketing renders,
+  commercial licences, the occasional plain miniature — seven across two
+  libraries); they get their own line in the summary instead of being pooled with
+  models whose downloads actually failed.
+- **A partial folder no longer masquerades as done.** Completion is decided by
+  the presence of a valid archive, not by the directory having files in it — a
+  folder of loose `.stl` files with no archive previously read as complete and
+  kept a model out of the missing list.
+- **A description is no longer overwritten with an empty one.** Metadata fetched
+  without a live session returns `description: null`, and that degraded copy used
+  to replace good text on the next run; the previous value is now kept when the
+  incoming one is empty.
+- `3_extract_all_zips.ps1` and `4_rename_folders_from_json.ps1` now use
+  `-LiteralPath` throughout. PowerShell's `-Path` treats the value as a wildcard,
+  so a library path containing `[PHASES]` or `[Modular]` matched nothing and the
+  scripts reported success while silently skipping everything. (The Bash scripts
+  were already safe — their globs quote the variable, which makes the brackets
+  literal.)
+- The whole-model route's fallback message deliberately avoids the phrase
+  "HTTP 403", which the desktop app's session-expiry detector reads as proof the
+  cookie died.
+
 ## [1.5.2] — 2026-09-09
 
 ### Fixed
