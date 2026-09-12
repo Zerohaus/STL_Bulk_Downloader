@@ -77,7 +77,7 @@ npm run dist:win
 
 Output installer path:
 
-- `dist\Bulk Downloader Setup 2.0.3.exe`
+- `dist\Bulk Downloader Setup 2.0.4.exe`
 
 ## Build macOS packages
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.4] — 2026-09-11
+
+### Fixed
+- **macOS custom folder icons** were surviving expansion as fake entries. A
+  zero-byte file named `Icon` plus a carriage return, whose real data lives in
+  a resource fork; sanitising strips the CR so several from different folders
+  collapsed onto `Icon`, `Icon_1`, `Icon_2`, `Icon_3`. Found by sweeping a
+  finished 135-model library for suspiciously small entries — 8 models, 27
+  entries. Same class as the `__MACOSX` forks fixed in 2.0.2.
+- **A set-aside source is now put back when packing fails.** Moving a colliding
+  source to a `__src_` name was not undone on the failure paths, so a run that
+  set the file aside and then failed to pack left no file under the declared
+  name — and the next run would re-download the model (4.7 GB in the case that
+  exposed it). The rename is tracked and reversed by the same routine every
+  failure path and the interrupt handler already call.
+
 ## [2.0.3] — 2026-09-11
 
 ### Fixed
