@@ -1938,6 +1938,12 @@ expand_zip_into_payload() {
     local sanitized=""
     local lower_name=""
     local target=""
+    local macos_icon=""
+
+    # macOS custom folder icon: a zero-byte file named "Icon" followed by a
+    # carriage return. Built with printf so no bare CR sits in this source
+    # file, where a line-ending conversion could quietly eat it.
+    printf -v macos_icon 'Icon\r'
 
     if [[ "$depth" -gt "$MAX_NESTED_ZIP_DEPTH" ]]; then
         echo -e "  ${YELLOW}[ZIP-WARN] Nested archive depth limit (${MAX_NESTED_ZIP_DEPTH}) reached; storing $(basename "$zip_path") as-is${NC}"
@@ -1980,6 +1986,13 @@ expand_zip_into_payload() {
         # legitimate file. Nested structure used to hide this; a flat archive
         # cannot, so drop the junk instead.
         if [[ "$member_path" == *"/__MACOSX/"* ]] || [[ "$member_name" == ._* ]]; then
+            continue
+        fi
+        # macOS custom folder icons are a zero-byte file literally named
+        # "Icon" followed by a carriage return; the real data lives in the
+        # resource fork. Sanitising strips the CR, so several of them from
+        # different folders collapse to Icon, Icon_1, Icon_2 ...
+        if [[ "$member_name" == "$macos_icon" ]] || [[ "$member_name" == "Icon" && ! -s "$member_path" ]]; then
             continue
         fi
         case "$lower_name" in
