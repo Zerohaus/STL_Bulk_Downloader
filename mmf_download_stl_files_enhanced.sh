@@ -1927,6 +1927,9 @@ PAYLOAD_STORE_NAMES=()
 PAYLOAD_DEFLATE_NAMES=()
 ZIP_COMPRESS_LEVEL="-0"
 ZIP_COMPRESS_APPEND=0
+# "<set-aside path>|<original path>" while a colliding source is moved out of
+# the way, so any failure path can put the name back.
+PAYLOAD_RENAMED_SOURCE=""
 
 expand_zip_into_payload() {
     local zip_path="$1"
@@ -2050,6 +2053,17 @@ restore_payload_originals() {
     local entry=""
     local staged_name=""
     local original_name=""
+
+    # Undo a set-aside rename first: leaving the source under its "__src_"
+    # name would make the next run think the declared file is missing.
+    if [[ -n "$PAYLOAD_RENAMED_SOURCE" ]]; then
+        staged_name="${PAYLOAD_RENAMED_SOURCE%%|*}"
+        original_name="${PAYLOAD_RENAMED_SOURCE#*|}"
+        if [[ -f "$staged_name" ]]; then
+            mv -f "$staged_name" "$original_name" 2>/dev/null || true
+        fi
+        PAYLOAD_RENAMED_SOURCE=""
+    fi
 
     for entry in "$@"; do
         staged_name="${entry%%|*}"
@@ -2741,6 +2755,7 @@ compress_non_json_assets() {
             echo -e "  ${RED}[FAIL] Could not set aside $(basename "$existing_archive") for repacking${NC}"
             return 1
         fi
+        PAYLOAD_RENAMED_SOURCE="${model_dir}/__src_${existing_archive##*/}|${existing_archive}"
         existing_archive=""
     fi
 
@@ -2822,7 +2837,7 @@ compress_non_json_assets() {
 
     if ! resolve_zip_executable >/dev/null 2>&1; then
         ZIP_COMPRESS_FAILURE="zip executable not found (expected bundled tools/zip.exe or system zip in PATH)"
-        print_archive_failure_report "$archive_path" "zip command failed (exit 127)" "${all_files[@]}"
+        print_archive_failure_report "${model_dir}/${archive_name}" "zip command failed (exit 127)" "${all_files[@]}"
         restore_payload_originals "$model_dir" "$payload_dir" "${moved_originals[@]}"
         return 1
     fi
@@ -2886,6 +2901,7 @@ compress_non_json_assets() {
     rm -rf "$payload_dir"
     ACTIVE_PAYLOAD_DIR=""
     PAYLOAD_MOVED_ORIGINALS=()
+    PAYLOAD_RENAMED_SOURCE=""
     zip_size=$(get_file_size "$archive_path")
     echo -e "  ${GREEN}[OK] Created $(basename "$archive_path") (${zip_size} bytes)${NC}"
     return 0
