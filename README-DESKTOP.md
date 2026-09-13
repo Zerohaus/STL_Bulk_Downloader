@@ -1,4 +1,4 @@
-# Bulk Downloader (Desktop v2.0.4)
+# Bulk Downloader (Desktop v2.0.5)
 
 Desktop app (Electron) + Bash/PowerShell scripts to bulk-download **your** MyMiniFactory library.
 

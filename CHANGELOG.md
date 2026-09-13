@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.5] — 2026-09-13
+
+### Fixed
+- **A finished model could be silently stranded in staging.** Moving a completed
+  model into the library can fail transiently on Windows when a virus scanner or
+  sync client still holds the multi-GB archive written seconds earlier. The
+  single attempt gave up and the run moved on, so the model never appeared in
+  the library despite being downloaded, packaged and verified. Seen on a live
+  605-model run: five models totalling ~13 GB, all of which moved without
+  complaint when retried — and only large ones, consistent with a scanner
+  holding the new file. The move now retries five times with doubling backoff
+  (`MMF_FINALIZE_ATTEMPTS`, default 5), explains why it is waiting, and if it
+  still cannot move the model says plainly that the work is safe in staging and
+  the next run will finish it.
+
 ## [2.0.4] — 2026-09-11
 
 ### Fixed
