@@ -1344,9 +1344,13 @@ prepare_model_staging_dir() {
 }
 
 # Moves a finished model into the library. Only called once the archive exists.
+
 finalize_model_staging_dir() {
     local staging="$1"
     local final_dir="$2"
+    local attempt=1
+    local max_attempts="${MMF_FINALIZE_ATTEMPTS:-5}"
+    local wait_sec=2
 
     if [[ "$staging" == "$final_dir" ]]; then
         return 0
@@ -1356,13 +1360,28 @@ finalize_model_staging_dir() {
         return 1
     fi
 
-    rm -rf "$final_dir"
-    if ! mv "$staging" "$final_dir" 2>/dev/null; then
-        echo -e "  ${RED}[FAIL] Could not move finished model into place: ${final_dir}${NC}"
-        return 1
-    fi
+    while [[ "$attempt" -le "$max_attempts" ]]; do
+        rm -rf "$final_dir" 2>/dev/null
+        if mv "$staging" "$final_dir" 2>/dev/null; then
+            if [[ "$attempt" -gt 1 ]]; then
+                echo -e "  ${GREEN}[OK] Moved into place on attempt ${attempt}${NC}"
+            fi
+            return 0
+        fi
 
-    return 0
+        if [[ "$attempt" -lt "$max_attempts" ]]; then
+            echo -e "  ${YELLOW}! Could not move ${final_dir} into place (attempt ${attempt}/${max_attempts}); retrying in ${wait_sec}s${NC}"
+            echo -e "  ${YELLOW}  Usually a virus scanner or sync client still holding the new archive.${NC}"
+            sleep "$wait_sec"
+            wait_sec=$((wait_sec * 2))
+        fi
+
+        attempt=$((attempt + 1))
+    done
+
+    echo -e "  ${RED}[FAIL] Could not move finished model into place: ${final_dir}${NC}"
+    echo -e "  ${YELLOW}  The completed model is in ${staging} and the next run will finish it.${NC}"
+    return 1
 }
 
 # A 140 GB run gets killed at least once. Leave nothing half-written behind.
@@ -2056,7 +2075,7 @@ restore_payload_originals() {
 
     # Undo a set-aside rename first: leaving the source under its "__src_"
     # name would make the next run think the declared file is missing.
-    if [[ -n "$PAYLOAD_RENAMED_SOURCE" ]]; then
+    if [[ -n "${PAYLOAD_RENAMED_SOURCE:-}" ]]; then
         staged_name="${PAYLOAD_RENAMED_SOURCE%%|*}"
         original_name="${PAYLOAD_RENAMED_SOURCE#*|}"
         if [[ -f "$staged_name" ]]; then
