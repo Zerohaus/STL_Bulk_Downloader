@@ -1,58 +1,44 @@
-# Bulk Downloader
+# STL Bulk Downloader
+Built using deliriyum's MyMiniFactory Model Downloader
+https://gist.github.com/deliriyum/d353b9528e970e242b1915bb51da2a61
 
-**Desktop v2.0.5** — see [README-DESKTOP.md](README-DESKTOP.md) for the current GUI workflow, [CHANGELOG.md](CHANGELOG.md) for release notes, [DESKTOP_EXE.md](DESKTOP_EXE.md) to build the installer.
+This app Downloads files you own from MyMiniFactory.
+This is not a scraper, it uses API calls.
+This does not download files that you do not own.
+Update: Now more efficient and dodges rate limit trigger.
+
+Download Here -> https://github.com/Zerohaus/STL_Bulk_Downloader/releases
+
+# WINDOWS
+Steps:
+1. Install the Bulk Downloader
+2. You may get a Windows Defender warning, ignore this. (we didn't purchase a Microsoft license)
+3. Open the application
+4. Click > Open MyMiniFactory (MMF)
+5. login to your MMF account and go to your profile page (leave this window open while downloading)
+6. In the app click > Capture Session
+7. Confirm the session is valid
+8. Select an Auto Load Source (Listings, Library or Creator Filter)
+9. Listings is for creators that want to download their files
+10. Library is for models you have purchased/ own in your Library
+11. Creator filter is for filtering your library to a specific creator
+12. Categories and Subcategories will append your download with category tags (optional) Useful if you want to upload to another marketplace.
+13. Select a download folder location
+14. It's reccomended to leave "I will run enhanced Step 2 in --test mode first" selected
+15. Click > Auto load my IDs
+16. If you make any changes to the filters above you will have to click Auto load my IDs again
+17. Click > Execute Pipeline
+18. If you selected to down load a subset, say 50 models, you can down load the next 50 models by clicking > Download Next Batch
+
+
+# MAC
+Also Available
 
 ---
 
-Legacy script-focused notes below (CLI). Desktop app is the recommended path.
+## Developer docs
 
-Desktop EXE build and startup dependency flow: see DESKTOP_EXE.md
-
-README.md - Full workflow explanation
-1_mmf_download_metadata.sh - Get JSON metadata
-2_mmf_download_stl_files.sh - Get actual files
-
-Key features both scripts have:
-
-✅ Windows line ending fixes (automatic)
-✅ Cookie authentication handling
-✅ Rate limiting to be respectful to servers
-✅ Clear error messages and progress tracking
-✅ Comprehensive troubleshooting documentation
-
-Script 2 specifically includes:
-
-✅ Redirect following with -L flag (critical fix)
-✅ URL cleaning to handle Windows corruption
-✅ jq path detection for cross-platform compatibility
-
-BONUS EXTRACTION AND RENAMING SCRIPTS (CROSS-PLATFORM)
-
-Windows versions:
-3_extract_all_zips.ps1 - [BONUS] Windows mass extraction
-4_rename_folders_from_json.ps1 - [BONUS] Intelligent renaming
-
-macOS/Linux versions:
-3_extract_all_zips.sh - [BONUS] Cross-platform mass extraction
-4_rename_folders_from_json.sh - [BONUS] Cross-platform intelligent renaming
-
-	What Users Need to Update:
-	Extract Script (extract_all_zips.ps1):
-
-	$BASE_PATH - Path to their stl_files directory
-	$EXTRACT_IN_PLACE - Choose extraction mode (true/false)
-
-	Rename Script (rename_folders_from_json.ps1):
-
-	$JSON_PATH - Path to directory with JSON files (usually downloads)
-	$FOLDERS_PATH - Path to stl_files directory with model folders
-	$NAMING_FORMAT - Choose "ID_NAME" or "NAME_ONLY" style
-	$MAX_NAME_LENGTH - Customize if needed
-
-Both scripts include:
-✅ Clear "UPDATE THIS" sections at the top with example paths
-✅ Path validation with helpful error messages if wrong
-✅ All the fixes we discovered (Explorer locks, filename cleaning, etc.)
-✅ Progress tracking and summary statistics
-✅ Comprehensive troubleshooting sections based on our debugging
-✅ Safe operation - won't overwrite or damage existing data
+- [README-DESKTOP.md](README-DESKTOP.md) — output layout, pacing, environment variables
+- [CHANGELOG.md](CHANGELOG.md) — release notes
+- [DESKTOP_EXE.md](DESKTOP_EXE.md) — building the installer
+- [_tools/MMF_DOWNLOADER_FINDINGS.md](_tools/MMF_DOWNLOADER_FINDINGS.md) — measured notes on the API, rate limiting, and archive conventions
