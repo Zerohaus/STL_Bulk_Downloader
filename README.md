@@ -5,7 +5,7 @@ https://gist.github.com/deliriyum/d353b9528e970e242b1915bb51da2a61
 This app Downloads files you own from MyMiniFactory.
 This is not a scraper, it uses API calls.
 This does not download files that you do not own.
-Update: Now more efficient and dodges rate limit ceilings.
+Update: Now more efficient and dodges rate limit trigger.
 
 Download Here -> https://github.com/Zerohaus/STL_Bulk_Downloader/releases
 
