@@ -223,7 +223,7 @@ URL but save under the sanitised name**.
 Keys in order: `name`, `description`, `tags`, `price`, `categories`.
 
 - `price` is a **float** (`3.99`), not the API's `{currency, symbol, value}` object.
-- `categories` is the fixed configured selection from the app's `desktop-settings.json`
+- `categories` is the fixed selection configured in the app's `desktop-settings.json`
   (`categorySelection`), identical in all 1,545 folders.
 - `description` is the **raw** API text; `clean_competitor_mentions.py` strips storefront
   promos afterwards as a separate pass.
