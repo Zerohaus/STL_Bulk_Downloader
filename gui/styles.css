@@ -1244,3 +1244,154 @@ select:focus {
         width: 100%;
     }
 }
+
+/* ── Step layout ─────────────────────────────────────────────────────────
+   The screen is three numbered steps in the order you do them: connect,
+   choose, download. Anything that is a repair tool, a diagnostic or a
+   duplicate lives inside a <details> so it is reachable without being in
+   the way. */
+
+.step + .step {
+    margin-top: 14px;
+}
+
+.step-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(16, 35, 29, 0.09);
+}
+
+.step-head h2 {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+.step-num {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+/* pushed right: the one number or state that matters for this step */
+.step-head .step-meta,
+.step-head .session-status {
+    margin-left: auto;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.step-head .step-meta strong {
+    color: var(--ink);
+    font-size: 1rem;
+}
+
+.batch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.batch-row label {
+    margin: 0;
+}
+
+.batch-row select {
+    width: auto;
+    min-width: 160px;
+}
+
+.batch-row .hint {
+    margin: 0;
+}
+
+.tag-optional {
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(16, 35, 29, 0.08);
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.btn-lg {
+    padding: 13px 20px;
+    font-size: 1rem;
+}
+
+/* a top-level <details> styled as a panel needs its summary to read as a header */
+details.panel > summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin: 0;
+}
+
+details.panel[open] > summary {
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(16, 35, 29, 0.09);
+}
+
+/* Present in the DOM for app.js, never shown. display:none keeps .value and
+   .textContent writable while removing these from the tab order and the
+   accessibility tree - a clip-based hide leaves inputs focusable, so tabbing
+   through the form lands on fields nobody can see. */
+.offscreen {
+    display: none;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+    .run-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Run controls: one obvious primary action, with the two situational
+   buttons sharing the row beneath it. */
+.run-grid {
+    grid-template-columns: 1fr 1fr;
+}
+
+#runExecuteBtn {
+    grid-column: 1 / -1;
+}
+
+#runNextBatchBtn {
+    grid-column: 1;
+}
+
+#stopRunBtn {
+    grid-column: 2;
+}
+
+/* A Stop button with nothing to stop should read as inert, not as a warning.
+   Red at 55% opacity is still a red block. */
+.btn-danger:disabled {
+    background: rgba(16, 35, 29, 0.09);
+    color: var(--muted);
+    opacity: 1;
+}

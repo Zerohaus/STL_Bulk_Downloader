@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'">
-    <title>Bulk Downloader Dashboard</title>
+    <title>Bulk Downloader</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -17,14 +17,17 @@
 
     <div id="desktopGate" class="desktop-gate hidden" role="dialog" aria-modal="true" aria-labelledby="desktopGateTitle">
         <section class="desktop-card">
-            <h2 id="desktopGateTitle">Desktop startup dependency check</h2>
+            <h2 id="desktopGateTitle">Setting up</h2>
             <p id="depSummary" class="hint">Checking dependencies...</p>
             <ul id="depList" class="requirements-list" aria-live="polite"></ul>
-            <pre id="depLog" class="preview dep-log">No installer output yet.</pre>
+            <details class="advanced-panel">
+                <summary>Installer output</summary>
+                <pre id="depLog" class="preview dep-log">No installer output yet.</pre>
+            </details>
             <div class="button-row">
-                <button id="depRefreshBtn" type="button" class="btn btn-secondary">Refresh check</button>
                 <button id="depInstallBtn" type="button" class="btn btn-primary">Install missing</button>
-                <button id="depSkipBtn" type="button" class="btn btn-secondary">Continue without install</button>
+                <button id="depRefreshBtn" type="button" class="btn btn-secondary">Check again</button>
+                <button id="depSkipBtn" type="button" class="btn btn-secondary">Skip</button>
             </div>
         </section>
     </div>
@@ -35,47 +38,46 @@
                 <div class="brand-mark">BD</div>
                 <div>
                     <h1>Bulk Downloader</h1>
-                    <p>Bulk download of 3D models.</p>
+                    <p>Download your MyMiniFactory models in bulk.</p>
                 </div>
             </div>
             <span id="connectionBadge" class="badge badge-offline">Not ready</span>
         </header>
 
-        <section class="stat-grid reveal delay-2" aria-label="Overview">
-            <article class="stat-card">
-                <h2 id="validIdCount">0</h2>
-                <p>Valid model IDs</p>
-            </article>
-            <article class="stat-card">
-                <h2 id="invalidLineCount">0</h2>
-                <p>Invalid lines</p>
-            </article>
-            <article class="stat-card">
-                <h2 id="requiredPassCount">0 / 5</h2>
-                <p>Required checks</p>
-            </article>
-            <article class="stat-card">
-                <h2 id="readinessPct">0%</h2>
-                <p>Readiness</p>
-            </article>
-        </section>
+        <!-- ───────────────────────── Step 1 ───────────────────────── -->
+        <section class="panel step reveal delay-2" aria-labelledby="step1-heading">
+            <div class="step-head">
+                <span class="step-num">1</span>
+                <h2 id="step1-heading">Connect your account</h2>
+                <span id="sessionStatus" class="session-status session-status-unknown" aria-live="polite">Not connected</span>
+            </div>
 
-        <section class="split-layout">
-            <section class="panel reveal delay-3" aria-labelledby="configuration-heading">
-                <div class="panel-header">
-                    <h2 id="configuration-heading">Configuration</h2>
-                </div>
+            <p class="hint">Sign in to MyMiniFactory, then capture the session so the app can download on your behalf.</p>
 
-                <div class="button-row auth-actions">
-                    <button id="openMmfLoginBtn" type="button" class="btn btn-primary">Open MyMiniFactory</button>
-                    <button id="captureMmfSessionBtn" type="button" class="btn btn-secondary">Capture session</button>
+            <div class="button-row auth-actions">
+                <button id="openMmfLoginBtn" type="button" class="btn btn-primary">Open MyMiniFactory</button>
+                <button id="captureMmfSessionBtn" type="button" class="btn btn-secondary">Capture session</button>
+            </div>
+
+            <details class="advanced-panel">
+                <summary>Not connecting?</summary>
+
+                <div class="button-row">
                     <button id="checkSessionBtn" type="button" class="btn btn-secondary">Check session</button>
+                    <button id="clearSessionBtn" type="button" class="btn btn-secondary">Clear session</button>
+                    <button id="validateBtn" type="button" class="btn btn-secondary">Re-check everything</button>
                 </div>
-                <p id="sessionStatus" class="session-status session-status-unknown" aria-live="polite">Session: not checked</p>
-                <p class="hint">Recommended: Open MMF → Capture session → Auto load my IDs.</p>
+
+                <h3 class="subheading">What's still missing</h3>
+                <ul id="requirementsList" class="requirements-list" aria-live="polite"></ul>
+                <div class="progress-track" aria-hidden="true">
+                    <div id="readinessBar" class="progress-bar"></div>
+                </div>
+                <p id="readinessText" class="hint"></p>
 
                 <details class="advanced-panel">
-                    <summary>Advanced: manual credentials (fallback)</summary>
+                    <summary>Enter credentials by hand</summary>
+                    <p class="hint">Only needed if Capture session fails. Open your MMF profile in the sign-in window so the publishable key can be detected.</p>
                     <label for="phpSessidInput">Cookie PHPSESSID</label>
                     <div class="secret-field">
                         <input id="phpSessidInput" type="password" autocomplete="off" placeholder="Paste only the PHPSESSID value">
@@ -96,203 +98,149 @@
                         <input id="publishableKeyInput" type="password" autocomplete="off" placeholder="Paste key that starts with pk_">
                         <button type="button" class="btn btn-secondary btn-inline secret-toggle" data-target="publishableKeyInput" aria-label="Show publishable API key">Show</button>
                     </div>
-                    <p class="hint">Use only if Capture session fails. Open your MMF profile in the sign-in window so the publishable key can be detected.</p>
                 </details>
-
-                <label>Your models</label>
-
-                <fieldset class="catalog-load-mode" aria-labelledby="catalogLoadModeLegend">
-                    <legend id="catalogLoadModeLegend">Auto load source</legend>
-                    <div class="catalog-load-grid">
-                        <label class="catalog-load-card">
-                            <input type="radio" name="catalogLoadMode" value="listing">
-                            <span class="catalog-load-card-inner">
-                                <span class="catalog-load-card-radio" aria-hidden="true"></span>
-                                <span class="catalog-load-card-text">
-                                    <span class="catalog-load-card-title">Listing</span>
-                                    <span class="catalog-load-card-desc">Models you created — only entries where your account is the creator.</span>
-                                </span>
-                            </span>
-                        </label>
-                        <label class="catalog-load-card">
-                            <input type="radio" name="catalogLoadMode" value="library" checked>
-                            <span class="catalog-load-card-inner">
-                                <span class="catalog-load-card-radio" aria-hidden="true"></span>
-                                <span class="catalog-load-card-text">
-                                    <span class="catalog-load-card-title">Library</span>
-                                    <span class="catalog-load-card-desc">Your full data library — creations, purchases, gifts, tribes, and downloads.</span>
-                                </span>
-                            </span>
-                        </label>
-                        <label class="catalog-load-card">
-                            <input type="radio" name="catalogLoadMode" value="creator">
-                            <span class="catalog-load-card-inner">
-                                <span class="catalog-load-card-radio" aria-hidden="true"></span>
-                                <span class="catalog-load-card-text">
-                                    <span class="catalog-load-card-title">Creator filter</span>
-                                    <span class="catalog-load-card-desc">Library entries filtered by a creator ID that you choose manually.</span>
-                                </span>
-                            </span>
-                        </label>
-                    </div>
-                </fieldset>
-
-                <div id="creatorFilterGroup" class="creator-filter-group hidden">
-                    <label for="creatorIdFilterInput">Creator ID filter</label>
-                    <input id="creatorIdFilterInput" type="text" placeholder="e.g. 123456">
-                    <p class="hint">Used only in Creator filter mode. It matches entries by creatorId.</p>
-                </div>
-
-                <div class="manual-retry-ids-group">
-                    <label for="manualRetryIdsInput">Manual retry IDs</label>
-                    <textarea id="manualRetryIdsInput" rows="4" placeholder="153318&#10;228967" spellcheck="false"></textarea>
-                    <p class="hint">Paste numeric model IDs that failed (one per line, or separated by commas). Use the same download folder — Step 2 skips files already on disk.</p>
-                    <div class="button-row manual-retry-ids-actions">
-                        <button id="loadManualIdsBtn" type="button" class="btn btn-secondary" disabled>Load manual IDs</button>
-                    </div>
-                </div>
-
-                <div class="model-tools-grid">
-                    <div>
-                        <label for="modelSearchInput">Search loaded models and creators</label>
-                        <div class="search-inline">
-                            <input id="modelSearchInput" type="text" placeholder="Search by model name, creator username, creator name, creator ID, or model ID">
-                            <button id="modelSearchClearBtn" type="button" class="btn btn-secondary btn-inline">Clear</button>
-                        </div>
-                        <p class="hint">Includes creator username and creator name fallback for entries where username is missing.</p>
-                    </div>
-                    <div>
-                        <label for="batchSizeSelect">Batch size</label>
-                        <select id="batchSizeSelect">
-                            <option value="10">10 models</option>
-                            <option value="25">25 models</option>
-                            <option value="50">50 models</option>
-                            <option value="100">100 models</option>
-                            <option value="all">All pending models</option>
-                        </select>
-                        <p id="batchStatus" class="hint">Batch progress not initialized.</p>
-                    </div>
-                </div>
-
-                <div class="model-id-list-header" aria-hidden="true">
-                    <span>ID</span>
-                    <span>Model and creator</span>
-                    <span></span>
-                </div>
-                <ul id="modelIdList" class="model-id-list" aria-label="Model IDs list"></ul>
-                <nav id="modelListPagination" class="model-list-pagination hidden" aria-label="Model list pages">
-                    <button id="modelListPrevBtn" type="button" class="btn btn-secondary btn-inline">Previous</button>
-                    <span id="modelListPageInfo" class="model-list-page-info">Page 1 of 1</span>
-                    <button id="modelListNextBtn" type="button" class="btn btn-secondary btn-inline">Next</button>
-                    <span id="modelListTotalInfo" class="model-list-total-info"></span>
-                </nav>
-                <textarea id="idsInput" class="hidden" tabindex="-1" aria-hidden="true"></textarea>
-                <p class="hint catalog-load-hint">All modes use objectPreviews. Large libraries are processed in chunks; the list shows 20 rows per page.</p>
-
-                <details class="category-section" id="categorySectionPanel" open>
-                    <summary id="categorySelectionHeading" class="subheading">Categories and subcategories</summary>
-                    <p class="hint">Optional for download. If set, the same selection is written to every model JSON in this run. Leave empty when your library spans many categories</p>
-                    <div id="categorySelectionList" class="category-selection-list" aria-live="polite"></div>
-                    <p id="categorySelectionSummary" class="hint">No categories selected.</p>
-                </details>
-
-                <label for="downloadRootInput">Download folder</label>
-                <div class="path-picker">
-                    <input id="downloadRootInput" type="text" placeholder="C:\\Users\\YourName\\Desktop\\models_downloads">
-                    <button id="browseDownloadRootBtn" type="button" class="btn btn-secondary btn-inline">Browse...</button>
-                    <button id="openDownloadRootBtn" type="button" class="btn btn-secondary btn-inline">Open folder</button>
-                </div>
-                <p class="hint">Step 1 and Step 2 use this folder. If empty, default is your system Downloads folder.</p>
-
-                <div class="download-history-box">
-                    <p class="hint download-history-title">Saved download folders</p>
-                    <ul id="downloadHistoryList" class="download-history-list" aria-label="Saved download folders"></ul>
-                </div>
-
-                <label class="checkline" for="testModeCheck">
-                    <input id="testModeCheck" type="checkbox" checked>
-                    I will run enhanced Step 2 in --test mode first.
-                </label>
-
-                <div class="button-row">
-                    <button id="autoLoadMyIdsBtn" type="button" class="btn btn-primary">Auto load my IDs</button>
-                    <button id="resetBatchProgressBtn" type="button" class="btn btn-secondary">Reset batch progress</button>
-                    <button id="clearCatalogBtn" type="button" class="btn btn-secondary">Clear model list</button>
-                    <button id="clearSessionBtn" type="button" class="btn btn-secondary">Clear session</button>
-                    <button id="validateBtn" type="button" class="btn btn-secondary">Validate setup</button>
-                </div>
-                <p class="hint">Auto load uses objectPreviews (usually one large JSON). Pagination is only used if the API signals it.</p>
-
-                <p id="statusMessage" class="status status-neutral">Ready to validate.</p>
-            </section>
-
-            <section class="panel reveal delay-4" aria-labelledby="requirements-heading">
-                <div class="panel-header">
-                    <h2 id="requirements-heading">Workflow requirement check</h2>
-                </div>
-
-                <ul id="requirementsList" class="requirements-list" aria-live="polite"></ul>
-
-                <div class="progress-track" aria-hidden="true">
-                    <div id="readinessBar" class="progress-bar"></div>
-                </div>
-                <p id="readinessText" class="hint"></p>
-
-                <div class="button-row">
-                    <button id="downloadIdsBtn" type="button" class="btn btn-primary">Download model_ids.txt</button>
-                    <button id="copyCommandsBtn" type="button" class="btn btn-secondary">Copy command plan</button>
-                </div>
-
-                <h3 class="subheading">Preview (valid IDs only)</h3>
-                <pre id="idsPreview" class="preview">No valid IDs yet.</pre>
-
-                <h3 class="subheading">Selected categories summary (optional)</h3>
-                <pre id="categorySelectionPreview" class="preview">No categories selected (optional for download).</pre>
-            </section>
+            </details>
         </section>
 
-        <section class="panel reveal delay-5" aria-labelledby="workflow-heading">
-            <div class="panel-header">
-                <h2 id="workflow-heading">Workflow commands</h2>
+        <!-- ───────────────────────── Step 2 ───────────────────────── -->
+        <section class="panel step reveal delay-3" aria-labelledby="step2-heading">
+            <div class="step-head">
+                <span class="step-num">2</span>
+                <h2 id="step2-heading">Choose your models</h2>
+                <span class="step-meta"><strong id="validIdCount">0</strong> models ready</span>
             </div>
 
-            <ol class="steps">
-                <li>
-                    <strong>Step 1: Download metadata</strong>
-                    <code>bash 1_mmf_download_metadata.sh</code>
-                </li>
-                <li>
-                    <strong>Step 2: Enter downloads folder</strong>
-                    <code>cd downloads</code>
-                </li>
-                <li>
-                    <strong>Step 2 test: Validate cookie and one file</strong>
-                    <code>bash ../mmf_download_stl_files_enhanced.sh --test</code>
-                </li>
-                <li>
-                    <strong>Step 2 full: Download all files</strong>
-                    <code>bash ../mmf_download_stl_files_enhanced.sh</code>
-                </li>
-                <li>
-                    <strong>Step 2 output per model folder</strong>
-                    <code>stl_files/model_&lt;id&gt;/model_&lt;id&gt;.json + &lt;model_name&gt;.zip + images/</code>
-                </li>
-            </ol>
+            <fieldset class="catalog-load-mode">
+                <legend class="sr-only">Which models to load</legend>
+                <div class="catalog-load-grid">
+                    <label class="catalog-load-card">
+                        <input type="radio" name="catalogLoadMode" value="library" checked>
+                        <span class="catalog-load-card-inner">
+                            <span class="catalog-load-card-radio" aria-hidden="true"></span>
+                            <span class="catalog-load-card-text">
+                                <span class="catalog-load-card-title">Everything I own</span>
+                                <span class="catalog-load-card-desc">Purchases, gifts, tribes and your own creations.</span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="catalog-load-card">
+                        <input type="radio" name="catalogLoadMode" value="listing">
+                        <span class="catalog-load-card-inner">
+                            <span class="catalog-load-card-radio" aria-hidden="true"></span>
+                            <span class="catalog-load-card-text">
+                                <span class="catalog-load-card-title">Only models I made</span>
+                                <span class="catalog-load-card-desc">Entries where your account is the creator.</span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="catalog-load-card">
+                        <input type="radio" name="catalogLoadMode" value="creator">
+                        <span class="catalog-load-card-inner">
+                            <span class="catalog-load-card-radio" aria-hidden="true"></span>
+                            <span class="catalog-load-card-text">
+                                <span class="catalog-load-card-title">One creator only</span>
+                                <span class="catalog-load-card-desc">Filter your library by a creator ID.</span>
+                            </span>
+                        </span>
+                    </label>
+                </div>
+            </fieldset>
 
-            <p class="hint">Rate limits: ~10 metadata requests/min (6s delay), 5s between STL/ZIP downloads, 3s between images. HTTP 429 triggers 45s backoff.</p>
-            <p class="hint">In desktop mode, dependency checks run before this screen is usable.</p>
-            <p id="runtimePath" class="hint">Execution root: resolving...</p>
+            <div id="creatorFilterGroup" class="creator-filter-group hidden">
+                <label for="creatorIdFilterInput">Creator ID</label>
+                <input id="creatorIdFilterInput" type="text" placeholder="e.g. 123456">
+            </div>
 
-            <h3 class="subheading">Run from desktop app</h3>
+            <div class="button-row">
+                <button id="autoLoadMyIdsBtn" type="button" class="btn btn-primary">Load my models</button>
+            </div>
+
+            <div class="search-inline">
+                <input id="modelSearchInput" type="text" placeholder="Search by model name, creator, or ID">
+                <button id="modelSearchClearBtn" type="button" class="btn btn-secondary btn-inline">Clear</button>
+            </div>
+
+            <div class="model-id-list-header" aria-hidden="true">
+                <span>ID</span>
+                <span>Model and creator</span>
+                <span></span>
+            </div>
+            <ul id="modelIdList" class="model-id-list" aria-label="Model IDs list"></ul>
+            <nav id="modelListPagination" class="model-list-pagination hidden" aria-label="Model list pages">
+                <button id="modelListPrevBtn" type="button" class="btn btn-secondary btn-inline">Previous</button>
+                <span id="modelListPageInfo" class="model-list-page-info">Page 1 of 1</span>
+                <button id="modelListNextBtn" type="button" class="btn btn-secondary btn-inline">Next</button>
+                <span id="modelListTotalInfo" class="model-list-total-info"></span>
+            </nav>
+
+            <div class="batch-row">
+                <label for="batchSizeSelect">Download in batches of</label>
+                <select id="batchSizeSelect">
+                    <option value="10">10 models</option>
+                    <option value="25">25 models</option>
+                    <option value="50">50 models</option>
+                    <option value="100">100 models</option>
+                    <option value="all">All pending models</option>
+                </select>
+                <span id="batchStatus" class="hint">Batch progress not initialized.</span>
+            </div>
+
+            <details class="category-section" id="categorySectionPanel">
+                <summary class="subheading">Set a category for every model <span class="tag-optional">optional</span></summary>
+                <p class="hint">If set, the same categories are written into every model JSON in this run. Leave empty when your library spans many categories.</p>
+                <div id="categorySelectionList" class="category-selection-list" aria-live="polite"></div>
+                <p id="categorySelectionSummary" class="hint">No categories selected.</p>
+            </details>
+
+            <details class="advanced-panel">
+                <summary>Retry failed models, or export the list</summary>
+
+                <label for="manualRetryIdsInput">Model IDs to retry</label>
+                <textarea id="manualRetryIdsInput" rows="4" placeholder="153318&#10;228967" spellcheck="false"></textarea>
+                <p class="hint">One numeric ID per line, or comma separated. Use the same download folder — files already on disk are skipped.</p>
+                <div class="button-row">
+                    <button id="loadManualIdsBtn" type="button" class="btn btn-secondary" disabled>Load these IDs</button>
+                </div>
+
+                <div class="button-row">
+                    <button id="downloadIdsBtn" type="button" class="btn btn-secondary">Export model_ids.txt</button>
+                    <button id="clearCatalogBtn" type="button" class="btn btn-secondary">Clear model list</button>
+                    <button id="resetBatchProgressBtn" type="button" class="btn btn-secondary">Reset batch progress</button>
+                </div>
+            </details>
+
+            <p id="statusMessage" class="status status-neutral">Ready to validate.</p>
+        </section>
+
+        <!-- ───────────────────────── Step 3 ───────────────────────── -->
+        <section class="panel step reveal delay-4" aria-labelledby="step3-heading">
+            <div class="step-head">
+                <span class="step-num">3</span>
+                <h2 id="step3-heading">Download</h2>
+            </div>
+
+            <label for="downloadRootInput">Save to</label>
+            <div class="path-picker">
+                <input id="downloadRootInput" type="text" placeholder="C:\\Users\\YourName\\Desktop\\models_downloads">
+                <button id="browseDownloadRootBtn" type="button" class="btn btn-secondary btn-inline">Browse...</button>
+                <button id="openDownloadRootBtn" type="button" class="btn btn-secondary btn-inline">Open folder</button>
+            </div>
+            <p class="hint">Leave empty to use your system Downloads folder.</p>
+
+            <details class="advanced-panel">
+                <summary>Recently used folders</summary>
+                <ul id="downloadHistoryList" class="download-history-list" aria-label="Saved download folders"></ul>
+            </details>
+
+            <label class="checkline" for="testModeCheck">
+                <input id="testModeCheck" type="checkbox" checked>
+                Test one file first, before downloading everything
+            </label>
+
             <div class="run-grid">
-                <button id="runExecuteBtn" type="button" class="btn btn-primary">Execute Pipeline</button>
-                <button id="runNextBatchBtn" type="button" class="btn btn-secondary">Download Next Batch</button>
-                <button id="runStep1Btn" type="button" class="btn btn-primary hidden">Run Step 1</button>
-                <button id="runStep2TestBtn" type="button" class="btn btn-secondary hidden">Run Step 2 Test</button>
-                <button id="runStep2FullBtn" type="button" class="btn btn-secondary hidden">Run Step 2 Full</button>
-                <button id="runStep3Btn" type="button" class="btn btn-secondary hidden">Run Step 3</button>
-                <button id="runStep4Btn" type="button" class="btn btn-secondary hidden">Run Step 4</button>
-                <button id="stopRunBtn" type="button" class="btn btn-danger" disabled>Stop active run</button>
+                <button id="runExecuteBtn" type="button" class="btn btn-primary btn-lg">Start download</button>
+                <button id="runNextBatchBtn" type="button" class="btn btn-secondary">Download next batch</button>
+                <button id="stopRunBtn" type="button" class="btn btn-danger" disabled>Stop</button>
             </div>
 
             <div id="pipelineProgressPanel" class="pipeline-progress-panel hidden" aria-live="polite">
@@ -306,94 +254,69 @@
                 <p id="pipelineProgressDetail" class="hint pipeline-progress-detail"></p>
             </div>
 
-            <div class="button-row">
-                <button id="clearLogBtn" type="button" class="btn btn-secondary">Clear run log</button>
-                <button id="openFilesFolderBtn" type="button" class="btn btn-secondary">Open files folder</button>
-            </div>
+            <p id="runStatus" class="status status-neutral">Nothing running.</p>
 
-            <p id="runStatus" class="status status-neutral">No workflow step running.</p>
-            <pre id="runLog" class="preview terminal-log">Run log will appear here.</pre>
+            <details class="advanced-panel">
+                <summary>Run log</summary>
+                <div class="button-row">
+                    <button id="clearLogBtn" type="button" class="btn btn-secondary">Clear log</button>
+                    <button id="openFilesFolderBtn" type="button" class="btn btn-secondary">Open files folder</button>
+                </div>
+                <pre id="runLog" class="preview terminal-log">Run log will appear here.</pre>
+                <p class="hint">Downloads are paced to stay inside MyMiniFactory's limits: 6s between metadata requests, 5s between files, 3s between images. A rate-limit response backs off for 45s.</p>
+            </details>
         </section>
 
-        <section class="panel reveal delay-6" aria-labelledby="json-viewer-heading">
-            <div class="panel-header">
-                <h2 id="json-viewer-heading">Model JSON viewer</h2>
-            </div>
-
-            <p class="hint">Browse downloaded model metadata and view formatted JSON without leaving the app.</p>
-
+        <details class="panel reveal delay-5">
+            <summary class="subheading">Browse downloaded model data</summary>
             <div class="json-toolbar">
                 <select id="jsonFileSelect" aria-label="Model JSON file selector"></select>
                 <button id="refreshJsonListBtn" type="button" class="btn btn-secondary">Refresh list</button>
-                <button id="openJsonFolderBtn" type="button" class="btn btn-secondary">Open JSON folder</button>
+                <button id="openJsonFolderBtn" type="button" class="btn btn-secondary">Open folder</button>
             </div>
-
             <pre id="jsonViewer" class="preview json-viewer">No model JSON selected yet.</pre>
-        </section>
-
-        <section class="panel reveal delay-6 hidden" aria-labelledby="windows-helper-heading">
-            <div class="panel-header">
-                <h2 id="windows-helper-heading">Optional path config helper</h2>
-            </div>
-
-            <p id="pathHelperHint" class="hint">Tip: use your downloads and stl_files folders. You can click Browse to pick folders.</p>
-
-            <div class="form-grid">
-                <div>
-                    <label for="basePathInput">BASE_PATH for extraction script</label>
-                    <div class="path-picker">
-                        <input id="basePathInput" type="text" placeholder="C:\\Users\\YourName\\Downloads\\MyMiniFactory\\downloads\\stl_files">
-                        <button id="browseBasePathBtn" type="button" class="btn btn-secondary btn-inline">Browse...</button>
-                    </div>
-                </div>
-                <div>
-                    <label for="extractModeSelect">EXTRACT_IN_PLACE</label>
-                    <select id="extractModeSelect">
-                        <option value="true">true</option>
-                        <option value="false">false</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="jsonPathInput">JSON_PATH for rename script</label>
-                    <div class="path-picker">
-                        <input id="jsonPathInput" type="text" placeholder="C:\\Users\\YourName\\Downloads\\MyMiniFactory\\downloads">
-                        <button id="browseJsonPathBtn" type="button" class="btn btn-secondary btn-inline">Browse...</button>
-                    </div>
-                </div>
-                <div>
-                    <label for="foldersPathInput">FOLDERS_PATH for rename script</label>
-                    <div class="path-picker">
-                        <input id="foldersPathInput" type="text" placeholder="C:\\Users\\YourName\\Downloads\\MyMiniFactory\\downloads\\stl_files">
-                        <button id="browseFoldersPathBtn" type="button" class="btn btn-secondary btn-inline">Browse...</button>
-                    </div>
-                </div>
-                <div>
-                    <label for="namingFormatSelect">NAMING_FORMAT</label>
-                    <select id="namingFormatSelect">
-                        <option value="ID_NAME">ID_NAME</option>
-                        <option value="NAME_ONLY">NAME_ONLY</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="maxLengthInput">MAX_NAME_LENGTH</label>
-                    <input id="maxLengthInput" type="number" min="10" max="160" value="80">
-                </div>
-            </div>
-
-            <div class="button-row">
-                <button id="useRecommendedPathsBtn" type="button" class="btn btn-secondary">Use recommended paths</button>
-                <button id="generatePsBtn" type="button" class="btn btn-primary">Generate post-process snippet</button>
-                <button id="copyPsBtn" type="button" class="btn btn-secondary">Copy snippet</button>
-                <button id="runPostProcessBtn" type="button" class="btn btn-primary">Run Step 3 + Step 4</button>
-            </div>
-
-            <pre id="psSnippet" class="preview">Click "Generate post-process snippet" to produce script settings.</pre>
-        </section>
-
-        <footer class="footer reveal delay-6">
-            <p>Desktop build targets: Windows (NSIS) and macOS (DMG/ZIP)</p>
-        </footer>
+        </details>
     </main>
+
+    <!--
+      Kept in the DOM, out of sight: app.js writes to all of these, but they are
+      duplicates of something already on screen, or diagnostics a user never needs.
+      Removing them would mean unpicking their JS call sites for no visible gain.
+    -->
+    <div class="offscreen" aria-hidden="true">
+        <span id="invalidLineCount"></span>
+        <span id="requiredPassCount"></span>
+        <span id="readinessPct"></span>
+        <span id="runtimePath"></span>
+        <pre id="idsPreview"></pre>
+        <pre id="categorySelectionPreview"></pre>
+        <textarea id="idsInput" tabindex="-1"></textarea>
+        <button id="copyCommandsBtn" type="button" tabindex="-1"></button>
+
+        <!-- per-step runners: superseded by "Start download", never shown -->
+        <button id="runStep1Btn" type="button" tabindex="-1"></button>
+        <button id="runStep2TestBtn" type="button" tabindex="-1"></button>
+        <button id="runStep2FullBtn" type="button" tabindex="-1"></button>
+        <button id="runStep3Btn" type="button" tabindex="-1"></button>
+        <button id="runStep4Btn" type="button" tabindex="-1"></button>
+
+        <!-- path config helper: this section was already hidden and unreachable -->
+        <p id="pathHelperHint"></p>
+        <input id="basePathInput" type="text">
+        <button id="browseBasePathBtn" type="button" tabindex="-1"></button>
+        <select id="extractModeSelect"><option value="true">true</option><option value="false">false</option></select>
+        <input id="jsonPathInput" type="text">
+        <button id="browseJsonPathBtn" type="button" tabindex="-1"></button>
+        <input id="foldersPathInput" type="text">
+        <button id="browseFoldersPathBtn" type="button" tabindex="-1"></button>
+        <select id="namingFormatSelect"><option value="ID_NAME">ID_NAME</option><option value="NAME_ONLY">NAME_ONLY</option></select>
+        <input id="maxLengthInput" type="number" value="80">
+        <button id="useRecommendedPathsBtn" type="button" tabindex="-1"></button>
+        <button id="generatePsBtn" type="button" tabindex="-1"></button>
+        <button id="copyPsBtn" type="button" tabindex="-1"></button>
+        <button id="runPostProcessBtn" type="button" tabindex="-1"></button>
+        <pre id="psSnippet"></pre>
+    </div>
 
     <script src="app.js"></script>
 </body>
