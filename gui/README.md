@@ -20,7 +20,7 @@ Auto-install uses:
 
 After dependency checks, the dashboard can execute workflow steps directly:
 
-- Execute Pipeline (Step 1 -> Step 2 Test -> Step 2 Full)
+- Start download (Step 1 -> Step 2 Test -> Step 2 Full)
 - Run Step 1
 - Run Step 2 Test
 - Run Step 2 Full

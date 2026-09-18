@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.6] — 2026-09-18
+
+### Changed
+- **The dashboard is now three numbered steps: connect, choose, download.**
+  The old screen showed everything at once — four stat cards where three were
+  the same readiness number, a "Workflow requirement check" panel that opened
+  with nine red bullets about cookies and JWTs, a list of bash commands that
+  nobody types now the app has buttons, and two sections that were already
+  hidden and unreachable. Repair tools, diagnostics and duplicates moved into
+  disclosures so they stay reachable without being in the way.
+- Labels now say what they do: *Library / Listing / Creator filter* became
+  *Everything I own / Only models I made / One creator only*, and
+  *Execute Pipeline* became **Start download**.
+
+### Fixed
+- Status messages named buttons that no longer existed. One mattered: the model
+  loader restored its label from a fallback of "Auto load my IDs", which
+  overwrote the new "Load my models" text at runtime.
+- The README walkthrough referred to the old button names throughout.
+
 ## [2.0.5] — 2026-09-13
 
 ### Fixed
