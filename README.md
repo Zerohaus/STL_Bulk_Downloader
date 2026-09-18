@@ -14,25 +14,35 @@ Steps:
 1. Install the Bulk Downloader
 2. You may get a Windows Defender warning, ignore this. (we didn't purchase a Microsoft license)
 3. Open the application
+
+### Step 1 - Connect your account
 4. Click > Open MyMiniFactory (MMF)
-5. login to your MMF account and go to your profile page (leave this window open while downloading)
-6. In the app click > Capture Session
-7. Confirm the session is valid
-8. Select an Auto Load Source (Listings, Library or Creator Filter)
-9. Listings is for creators that want to download their files
-10. Library is for models you have purchased/ own in your Library
-11. Creator filter is for filtering your library to a specific creator
-12. Categories and Subcategories will append your download with category tags (optional) Useful if you want to upload to another marketplace.
-13. Select a download folder location
-14. It's reccomended to leave "I will run enhanced Step 2 in --test mode first" selected
-15. Click > Auto load my IDs
-16. If you make any changes to the filters above you will have to click Auto load my IDs again
-17. Click > Execute Pipeline
-18. If you selected to down load a subset, say 50 models, you can down load the next 50 models by clicking > Download Next Batch
+5. Login to your MMF account and go to your profile page (leave this window open while downloading)
+6. Back in the app click > Capture session
+7. The label at the top right of Step 1 should change to connected. If it doesn't, open "Not connecting?" for checks, a re-check button, and manual credential entry.
+
+### Step 2 - Choose your models
+8. Pick which models to load:
+   - **Everything I own** - models you have purchased or own in your Library
+   - **Only models I made** - for creators who want to download their own files
+   - **One creator only** - filters your Library down to a single creator ID
+9. Click > Load my models
+10. If you change the selection above, click Load my models again
+11. Use the search box to find particular models, and "Download in batches of" to split a large library into chunks
+12. "Set a category for every model" is optional. It writes the same category tags into every model JSON, which is useful if you want to upload to another marketplace.
+13. Failed models can be re-run later from "Retry failed models, or export the list"
+
+### Step 3 - Download
+14. Set "Save to" to the folder you want the files in
+15. It's recommended to leave "Test one file first, before downloading everything" selected
+16. Click > Start download
+17. If you chose a batch size, download the following batch with > Download next batch
+18. "Run log" shows the detailed output if you need to see what's happening
 
 
 # MAC
 Also Available
+MMF Downloader
 
 ---
 
