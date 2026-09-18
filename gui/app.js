@@ -1652,7 +1652,7 @@ function renderModelIdList() {
     if (modelIdEntries.length === 0) {
         const emptyItem = document.createElement("li");
         emptyItem.className = "model-id-row model-id-row-empty";
-        emptyItem.textContent = "No models loaded yet. Capture session, then click Auto load my IDs.";
+        emptyItem.textContent = "No models loaded yet. Connect your account, then click Load my models.";
         elements.modelIdList.appendChild(emptyItem);
         updateModelListPaginationUi();
         return;
@@ -2080,7 +2080,7 @@ function buildRequirementState() {
                 : "Leave empty when downloading mixed libraries; categorize each model when uploading to your store app."
         },
         {
-            label: "Enhanced Step 2 test mode is acknowledged",
+            label: "Single-file test before the full download is acknowledged",
             pass: elements.testModeCheck.checked,
             required: false,
             help: "Run --test first so one file validates before full download."
@@ -2747,7 +2747,7 @@ async function autoLoadOwnModelIds(options = {}) {
 
         if (button) {
             button.disabled = false;
-            button.textContent = previousLabel || "Auto load my IDs";
+            button.textContent = previousLabel || "Load my models";
         }
     }
 }
@@ -3497,7 +3497,7 @@ function recoverInterruptedBatchState() {
 
     updateBatchStatusUi();
     appendRunLog(`[batch] ${batchProgressState.lastError}`, "stderr");
-    setStatus(`Detected interrupted pipeline from a previous session in ${runRoot}. Run Execute Pipeline again to continue that batch.`, "warn");
+    setStatus(`Detected interrupted pipeline from a previous session in ${runRoot}. Click Start download again to continue that batch.`, "warn");
     scheduleSettingsSave();
 }
 
