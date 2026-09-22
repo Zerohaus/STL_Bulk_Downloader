@@ -1888,6 +1888,88 @@ collect_model_root_asset_files() {
     done < <(find "$model_dir" -maxdepth 1 -type f ! -name "*.json" ! -name "$exclude_name" -print0 2>/dev/null)
 }
 
+# True when MMF declares this exact filename as one of the model's downloads.
+# Compared on the sanitised leaf name, because that is what ends up on disk.
+is_declared_zip_name() {
+    local source_json="$1"
+    local candidate="$2"
+    local wanted=""
+    local declared=""
+
+    [[ "$candidate" == *.zip || "$candidate" == *.ZIP ]] || return 1
+    wanted="$(sanitize_filename "$candidate" | tr '[:upper:]' '[:lower:]')"
+    [[ -n "$wanted" ]] || return 1
+
+    while IFS= read -r declared; do
+        [[ -z "$declared" ]] && continue
+        [[ "$(sanitize_filename "$(trim_field "$declared")" | tr '[:upper:]' '[:lower:]')" == "$wanted" ]] && return 0
+    done < <($JQ_CMD -r '.files.items[]? | select((.filename // "") | ascii_downcase | endswith(".zip")) | .filename' "$source_json" 2>/dev/null)
+
+    return 1
+}
+
+# How many of the model's declared downloads are archives.
+declared_zip_count() {
+    $JQ_CMD -r '[.files.items[]? | select((.filename // "") | ascii_downcase | endswith(".zip"))] | length' "$1" 2>/dev/null || printf '0'
+}
+
+# The whole-model route fetches one container holding the declared files. To
+# keep those files separate we unwrap it a single level into the model folder
+# and let the normal per-file handling take over; without this the container
+# would be expanded recursively and its groupings flattened.
+explode_whole_model_one_level() {
+    local archive_path="$1"
+    local model_dir="$2"
+    local work_dir="${model_dir}/.wm.$$"
+    local member_path=""
+    local member_name=""
+    local sanitized=""
+    local target=""
+    local macos_icon=""
+    local extracted=0
+
+    printf -v macos_icon 'Icon\r'
+
+    command -v unzip >/dev/null 2>&1 || return 1
+    rm -rf "$work_dir"
+    mkdir -p "$work_dir" || return 1
+
+    if ! unzip -qq -o "$archive_path" -d "$work_dir" >/dev/null 2>&1; then
+        rm -rf "$work_dir"
+        return 1
+    fi
+
+    while IFS= read -r -d '' member_path; do
+        member_name="$(basename "$member_path")"
+        # Same packaging debris the nested expander drops.
+        if [[ "$member_path" == *"/__MACOSX/"* ]] || [[ "$member_name" == ._* ]]; then
+            continue
+        fi
+        if [[ "$member_name" == "$macos_icon" ]] || [[ "$member_name" == "Icon" && ! -s "$member_path" ]]; then
+            continue
+        fi
+        case "$(printf '%s' "$member_name" | tr '[:upper:]' '[:lower:]')" in
+            .ds_store|thumbs.db|desktop.ini) continue ;;
+        esac
+
+        sanitized="$(sanitize_filename "$member_name")"
+        [[ -z "$sanitized" ]] && continue
+        target="$sanitized"
+        # A member colliding with something already at the model root would
+        # clobber it, so give it a suffix rather than lose either file.
+        if [[ -e "${model_dir}/${target}" ]]; then
+            target="dup_$$_${sanitized}"
+        fi
+        mv -f "$member_path" "${model_dir}/${target}" || { rm -rf "$work_dir"; return 1; }
+        extracted=$((extracted + 1))
+    done < <(find "$work_dir" -type f -print0 2>/dev/null)
+
+    rm -rf "$work_dir"
+    [[ "$extracted" -gt 0 ]] || return 1
+    rm -f "$archive_path"
+    return 0
+}
+
 sum_compress_input_bytes() {
     local model_dir="$1"
     shift
@@ -1938,6 +2020,14 @@ ensure_compress_free_space() {
 # nesting runs two deep, so a single pass is not enough; the depth cap is a
 # guard against a maliciously or accidentally self-nesting archive.
 MAX_NESTED_ZIP_DEPTH="${MMF_MAX_NESTED_ZIP_DEPTH:-4}"
+
+# Creators group their files into separate downloads on purpose: The Last
+# Hearth Inn ships as LV1..LV5 plus XTRAS so a buyer can print one floor at a
+# time. Merging those into a single archive throws that away, and the creator
+# has no way to get it back. With this on, a .zip that MMF declares is kept as
+# its own file in the model folder; only loose files are packed together.
+# Set MMF_PRESERVE_DECLARED_ZIPS=0 for the old single-archive behaviour.
+PRESERVE_DECLARED_ZIPS="${MMF_PRESERVE_DECLARED_ZIPS:-1}"
 EXPANDED_FROM_ZIP_COUNT=0
 # Entries destined for the flat archive, split by how they should be stored.
 # Plain files keep their bytes verbatim (STORED) so entry sizes still match the
@@ -2143,6 +2233,28 @@ model_assets_already_archived() {
     local archive_base=""
 
     archive_base=$(get_model_archive_basename "$source_json" "$model_id" "$name_hint")
+
+    # A model delivered entirely as creator archives has no combined zip to
+    # look for, so completeness is "every declared archive is on disk". Without
+    # this the model looks unfinished forever and re-downloads on every run.
+    if [[ "$PRESERVE_DECLARED_ZIPS" == "1" ]]; then
+        local declared_zips=0
+        declared_zips=$(declared_zip_count "$source_json")
+        if [[ "$declared_zips" -gt 1 ]]; then
+            local total_declared=0
+            total_declared=$($JQ_CMD -r '[.files.items[]?] | length' "$source_json" 2>/dev/null || printf '0')
+            if [[ "$declared_zips" -eq "$total_declared" ]]; then
+                local declared_name="" present=0
+                while IFS= read -r declared_name; do
+                    [[ -z "$declared_name" ]] && continue
+                    if [[ -f "${model_dir}/$(sanitize_filename "$(trim_field "$declared_name")")" ]]; then
+                        present=$((present + 1))
+                    fi
+                done < <($JQ_CMD -r '.files.items[]? | .filename // empty' "$source_json" 2>/dev/null)
+                [[ "$present" -eq "$declared_zips" ]] && return 0
+            fi
+        fi
+    fi
 
     # Deliberately not "does the directory have files in it" -- a folder of
     # loose .stl files with no archive is a half-built model, not a finished
@@ -2763,6 +2875,15 @@ compress_non_json_assets() {
     archive_base=$(get_model_archive_basename "$source_json" "$model_id")
     existing_archive=$(find_existing_assets_archive "$model_dir" "$archive_base" || true)
 
+    # In preserve mode a declared archive is a finished output even when it
+    # shares the model's name, so it must not be set aside and repacked.
+    if [[ "$PRESERVE_DECLARED_ZIPS" == "1" ]] && [[ -n "$existing_archive" ]] \
+            && is_declared_zip_name "$source_json" "${existing_archive##*/}"; then
+        existing_size=$(get_file_size "$existing_archive")
+        echo -e "  ${GREEN}[SKIP] Creator archive already in place: $(basename "$existing_archive") (${existing_size} bytes)${NC}"
+        return 0
+    fi
+
     if [[ -n "$existing_archive" ]] && archive_is_declared_source "$source_json" "${existing_archive##*/}"         && ! archive_looks_repacked "$existing_archive"; then
         # Same name as the archive we build, but it is the creator's own file
         # and still needs expanding and repacking. Move it aside first: the
@@ -2785,6 +2906,20 @@ compress_non_json_assets() {
     fi
 
     archive_name="${archive_base}.zip"
+
+    # Unwrap the whole-model container first so the files MMF declares sit at
+    # the model root, where each one can be judged on its own.
+    if [[ "$PRESERVE_DECLARED_ZIPS" == "1" ]] && [[ "$(declared_zip_count "$source_json")" -gt 1 ]]; then
+        local whole_archive=""
+        whole_archive="$(whole_model_archive_path "$model_dir" "$model_id")"
+        if [[ -f "$whole_archive" ]]; then
+            if explode_whole_model_one_level "$whole_archive" "$model_dir"; then
+                echo -e "  ${CYAN}[ZIP] Unwrapped the whole-model download; keeping its files separate${NC}"
+            else
+                echo -e "  ${YELLOW}[ZIP-WARN] Could not unwrap the whole-model download; packing as one archive${NC}"
+            fi
+        fi
+    fi
 
     collect_model_root_asset_files "$model_dir" "$archive_name" all_files
 
@@ -2814,9 +2949,18 @@ compress_non_json_assets() {
     PAYLOAD_STORE_NAMES=()
     PAYLOAD_DEFLATE_NAMES=()
     EXPANDED_FROM_ZIP_COUNT=0
+    KEPT_DECLARED_ZIPS=()
 
     for file_name in "${all_files[@]}"; do
         lower_name=$(printf '%s' "$file_name" | tr '[:upper:]' '[:lower:]')
+
+        # A .zip the creator uploaded stays exactly as it is, in the model
+        # folder, as its own download. This is the grouping they chose.
+        if [[ "$PRESERVE_DECLARED_ZIPS" == "1" ]] && [[ "$lower_name" == *.zip ]] \
+                && is_declared_zip_name "$source_json" "$file_name"; then
+            KEPT_DECLARED_ZIPS+=("$file_name")
+            continue
+        fi
 
         if [[ "$lower_name" == *.zip ]]; then
             # Left in place until the new archive validates -- unzip only reads
@@ -2842,6 +2986,19 @@ compress_non_json_assets() {
     done
 
     if [[ ${#PAYLOAD_STORE_NAMES[@]} -eq 0 ]] && [[ ${#PAYLOAD_DEFLATE_NAMES[@]} -eq 0 ]]; then
+        # Every declared file was already an archive, so the model is finished
+        # and there is nothing left to pack. That is a success, not a failure.
+        if [[ ${#KEPT_DECLARED_ZIPS[@]} -gt 0 ]]; then
+            rm -rf "$payload_dir"
+            ACTIVE_PAYLOAD_DIR=""
+            PAYLOAD_MOVED_ORIGINALS=()
+            PAYLOAD_RENAMED_SOURCE=""
+            echo -e "  ${GREEN}[OK] Kept ${#KEPT_DECLARED_ZIPS[@]} creator archive(s) as separate downloads${NC}"
+            for file_name in "${KEPT_DECLARED_ZIPS[@]}"; do
+                echo -e "      ${GREEN}${file_name} ($(get_file_size "${model_dir}/${file_name}") bytes)${NC}"
+            done
+            return 0
+        fi
         echo -e "  ${YELLOW}! Nothing to package for model $model_id after expansion${NC}"
         rm -rf "$payload_dir"
         return 1
@@ -2904,8 +3061,13 @@ compress_non_json_assets() {
     fi
 
     # Sources go first so the archive can take its proper name even when a
-    # declared file was spelled identically.
+    # declared file was spelled identically. Archives we deliberately kept are
+    # outputs now, not sources, so they must survive this sweep.
     for file_name in "${all_files[@]}"; do
+        if [[ ${#KEPT_DECLARED_ZIPS[@]} -gt 0 ]] \
+                && printf '%s\n' "${KEPT_DECLARED_ZIPS[@]}" | grep -qxF "$file_name"; then
+            continue
+        fi
         rm -f "${model_dir}/${file_name}"
     done
 
@@ -2923,6 +3085,12 @@ compress_non_json_assets() {
     PAYLOAD_RENAMED_SOURCE=""
     zip_size=$(get_file_size "$archive_path")
     echo -e "  ${GREEN}[OK] Created $(basename "$archive_path") (${zip_size} bytes)${NC}"
+    if [[ ${#KEPT_DECLARED_ZIPS[@]} -gt 0 ]]; then
+        echo -e "  ${GREEN}[OK] Kept ${#KEPT_DECLARED_ZIPS[@]} creator archive(s) alongside it${NC}"
+        for file_name in "${KEPT_DECLARED_ZIPS[@]}"; do
+            echo -e "      ${GREEN}${file_name} ($(get_file_size "${model_dir}/${file_name}") bytes)${NC}"
+        done
+    fi
     return 0
 }
 
