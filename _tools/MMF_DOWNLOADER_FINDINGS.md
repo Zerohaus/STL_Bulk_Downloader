@@ -237,6 +237,10 @@ convention.
 
 ### 4.3 Archive contents
 
+> **Superseded for grouped models, 2026-09-21 (v2.0.7).** The rule below described
+> the library as built up to 2.0.6, and it destroyed something creators rely on. See
+> *4.3a* for what the downloader does now.
+
 - **Flat** — no directories.
 - **Nested zips are expanded, recursively.** A model whose `files.items` is a single
   `Mausoleum 02.zip` has that zip's *contents* in the archive, not the zip. Nesting can be
@@ -255,6 +259,47 @@ convention.
 
 - Verify each downloaded file's byte count against the API's declared `size` before
   committing it.
+
+### 4.3a Declared archives are kept separate (v2.0.7 onward)
+
+**A creator's file grouping is a decision, not packaging.** *The Last Hearth Inn*
+ships as `LHI_INN_LV1_v3.zip` … `LHI_INN_LV5.zip` plus `LHI_INN_XTRAS.zip` so a buyer
+can print one floor at a time. Expanding and repacking those into a single 712 MB
+archive throws that away, and **nothing downstream can reconstruct it** — the creator
+raised it as a complaint.
+
+So: **a `.zip` that `files.items` declares is kept as its own file in the model
+folder.** Only loose files are packed into `<ModelName>.zip`.
+
+| Model's file list | Output |
+|---|---|
+| all loose files | one `<ModelName>.zip` — *unchanged* |
+| several declared `.zip` | those archives, kept side by side, untouched |
+| mixed | the declared archives **plus** one `<ModelName>.zip` of the loose remainder |
+
+Scale check before changing it: of 430 Brander Roullett models, **428 are loose
+meshes** and 1 declares multiple archives — so the common path is untouched and only
+genuinely grouped models differ.
+
+Consequences worth knowing:
+
+- **The whole-model route returns a container holding the declared archives**, so it is
+  unwrapped exactly *one* level, not expanded recursively. The same debris filter
+  (`__MACOSX`, `._*`, `.DS_Store`, `Icon\r`) runs on the unwrap.
+- **Completeness had to change.** A model delivered entirely as creator archives has no
+  combined zip to look for, so "finished" is now *every declared archive is on disk*.
+  Without that the model looks unfinished and re-downloads on every run.
+- **Junk inside a creator's archive now ships as-is**, because the archive is no longer
+  opened. That is the price of preserving the grouping; the expansion path was what used
+  to strip it.
+- The conditional-compression rule above still applies to whatever *is* packed.
+
+`MMF_PRESERVE_DECLARED_ZIPS=0` restores the 2.0.6 single-archive behaviour.
+Covered by `_tools/test_preserve_declared_zips.sh` (grouped, loose, mixed, opt-out,
+resume — 11 assertions against real zip files).
+
+**The library built before 2.0.7 does not follow this**, so grouped models downloaded
+earlier are still merged. Re-downloading them is a backfill decision.
 
 ---
 
