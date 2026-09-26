@@ -1395,3 +1395,14 @@ details.panel[open] > summary {
     color: var(--muted);
     opacity: 1;
 }
+
+/* Which build is running, next to the title. Muted: useful when you go
+   looking for it, not competing with the app name. */
+.app-version {
+    margin-left: 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+}

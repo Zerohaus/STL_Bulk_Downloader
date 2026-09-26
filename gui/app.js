@@ -78,6 +78,7 @@ const elements = {
     depInstallBtn: document.getElementById("depInstallBtn"),
     depSkipBtn: document.getElementById("depSkipBtn"),
     runtimePath: document.getElementById("runtimePath"),
+    appVersion: document.getElementById("appVersion"),
     runExecuteBtn: document.getElementById("runExecuteBtn"),
     runNextBatchBtn: document.getElementById("runNextBatchBtn"),
     runStep1Btn: document.getElementById("runStep1Btn"),
@@ -3240,6 +3241,13 @@ async function loadRuntimeInfo() {
         });
         runtimeInfoCache = runtime;
         runtimePlatform = runtime.platform || "unknown";
+        // Which build is actually running should be visible without digging:
+        // a run was debugged for an hour against a version that did not have
+        // the fix in it.
+        if (elements.appVersion && runtime.appVersion) {
+            elements.appVersion.textContent = `v${runtime.appVersion}`;
+            elements.appVersion.title = `Bulk Downloader ${runtime.appVersion}`;
+        }
         elements.runtimePath.textContent = `Execution root: ${runtime.scriptRoot} (${runtimePlatform}) | download folder: ${runtime.downloadsPath}`;
 
         applyRecommendedPaths(false);

@@ -1613,7 +1613,8 @@ function getRuntimeInfo(rawConfig) {
         downloadRoot: resolved.customDownloadRoot,
         usingDefaultDownloadRoot: !resolved.customDownloadRoot,
         isPackaged: app.isPackaged,
-        platform: process.platform
+        platform: process.platform,
+        appVersion: app.getVersion()
     };
 }
 
