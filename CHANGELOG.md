@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.8] — 2026-09-25
+
+### Fixed
+- **A non-ASCII filename could stop an entire run.** A 676-model run ended at
+  model 178 on an image called `Бeз_имeни-1.jpg`, reporting "could not write
+  download to disk" with 7.2 TB free.
+
+  curl on Windows cannot write a path containing non-ASCII bytes: asked for that
+  name it reports success and silently creates `_e____e__-1.jpg`, so the script
+  cannot find the file it just downloaded. Sanitising now transliterates
+  Cyrillic and accented Latin and replaces anything still non-ASCII, so
+  `Бeз_имeни-1.jpg` becomes `Bez_imeni-1.jpg` and `Café.stl` becomes `Cafe.stl`
+  rather than a row of underscores. Ordinary names are unchanged, as is the
+  existing folding of Greek lookalikes in Roman numerals.
+
+- **An image the filesystem rejects no longer ends the run.** A genuinely full
+  disk still stops, but when space is fine the image is skipped, counted, and
+  reported in the closing summary. The model's archive is already safe at that
+  point, and one thumbnail should not cost the remaining models.
+
 ## [2.0.7] — 2026-09-21
 
 ### Changed
