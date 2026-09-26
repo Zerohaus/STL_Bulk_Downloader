@@ -1443,6 +1443,76 @@ _fold_homoglyphs() {
     printf -v "$2" '%s' "$__h"
 }
 
+# Cyrillic that is NOT a Latin lookalike still has to go, because curl on
+# Windows cannot write a path containing it: asked for "Бeз_имeни-1.jpg" it
+# reports success and silently creates "_e____e__-1.jpg" instead, so the script
+# then cannot find the file it just downloaded and stops the whole run.
+# Transliterating gives a readable ASCII name rather than a row of underscores.
+# Runs after _fold_homoglyphs, which has already taken the lookalikes.
+_transliterate_cyrillic() {
+    local __t="$1"
+
+    case "$__t" in
+        *[!$'\x01'-$'\x7f']*) ;;    # only worth the substitutions if non-ASCII
+        *) printf -v "$2" '%s' "$__t"; return 0 ;;
+    esac
+
+    __t="${__t//$'Ж'/Zh}"; __t="${__t//$'ж'/zh}"
+    __t="${__t//$'Ч'/Ch}"; __t="${__t//$'ч'/ch}"
+    __t="${__t//$'Ш'/Sh}"; __t="${__t//$'ш'/sh}"
+    __t="${__t//$'Щ'/Shch}"; __t="${__t//$'щ'/shch}"
+    __t="${__t//$'Ю'/Yu}"; __t="${__t//$'ю'/yu}"
+    __t="${__t//$'Я'/Ya}"; __t="${__t//$'я'/ya}"
+    __t="${__t//$'Ц'/Ts}"; __t="${__t//$'ц'/ts}"
+    __t="${__t//$'Є'/Ye}"; __t="${__t//$'є'/ye}"
+    __t="${__t//$'Ї'/Yi}"; __t="${__t//$'ї'/yi}"
+    __t="${__t//$'Б'/B}"; __t="${__t//$'б'/b}"
+    __t="${__t//$'Г'/G}"; __t="${__t//$'г'/g}"
+    __t="${__t//$'Ґ'/G}"; __t="${__t//$'ґ'/g}"
+    __t="${__t//$'Д'/D}"; __t="${__t//$'д'/d}"
+    __t="${__t//$'Ё'/E}"; __t="${__t//$'ё'/e}"
+    __t="${__t//$'Э'/E}"; __t="${__t//$'э'/e}"
+    __t="${__t//$'З'/Z}"; __t="${__t//$'з'/z}"
+    __t="${__t//$'И'/I}"; __t="${__t//$'и'/i}"
+    __t="${__t//$'Й'/Y}"; __t="${__t//$'й'/y}"
+    __t="${__t//$'Ы'/Y}"; __t="${__t//$'ы'/y}"
+    __t="${__t//$'К'/K}"; __t="${__t//$'к'/k}"
+    __t="${__t//$'Л'/L}"; __t="${__t//$'л'/l}"
+    __t="${__t//$'М'/M}"; __t="${__t//$'м'/m}"
+    __t="${__t//$'Н'/N}"; __t="${__t//$'н'/n}"
+    __t="${__t//$'П'/P}"; __t="${__t//$'п'/p}"
+    __t="${__t//$'Ф'/F}"; __t="${__t//$'ф'/f}"
+    # Soft and hard signs carry no sound; dropping them beats an underscore.
+    __t="${__t//$'Ъ'/}"; __t="${__t//$'ъ'/}"
+    __t="${__t//$'Ь'/}"; __t="${__t//$'ь'/}"
+
+    # Accented Latin, so a European creator's name survives as itself rather
+    # than losing letters: "Café" should be Cafe, not Caf_.
+    # One substitution per character, never a bracket set: a bracket expression
+    # matches single BYTES, so [àáâ] tears multi-byte characters in half and
+    # turns "Café" into "Cafae".
+    __t="${__t//$'à'/a}"; __t="${__t//$'á'/a}"; __t="${__t//$'â'/a}"
+    __t="${__t//$'ã'/a}"; __t="${__t//$'ä'/a}"; __t="${__t//$'å'/a}"
+    __t="${__t//$'À'/A}"; __t="${__t//$'Á'/A}"; __t="${__t//$'Â'/A}"
+    __t="${__t//$'Ã'/A}"; __t="${__t//$'Ä'/A}"; __t="${__t//$'Å'/A}"
+    __t="${__t//$'è'/e}"; __t="${__t//$'é'/e}"; __t="${__t//$'ê'/e}"; __t="${__t//$'ë'/e}"
+    __t="${__t//$'È'/E}"; __t="${__t//$'É'/E}"; __t="${__t//$'Ê'/E}"; __t="${__t//$'Ë'/E}"
+    __t="${__t//$'ì'/i}"; __t="${__t//$'í'/i}"; __t="${__t//$'î'/i}"; __t="${__t//$'ï'/i}"
+    __t="${__t//$'Ì'/I}"; __t="${__t//$'Í'/I}"; __t="${__t//$'Î'/I}"; __t="${__t//$'Ï'/I}"
+    __t="${__t//$'ò'/o}"; __t="${__t//$'ó'/o}"; __t="${__t//$'ô'/o}"
+    __t="${__t//$'õ'/o}"; __t="${__t//$'ö'/o}"; __t="${__t//$'ø'/o}"
+    __t="${__t//$'Ò'/O}"; __t="${__t//$'Ó'/O}"; __t="${__t//$'Ô'/O}"
+    __t="${__t//$'Õ'/O}"; __t="${__t//$'Ö'/O}"; __t="${__t//$'Ø'/O}"
+    __t="${__t//$'ù'/u}"; __t="${__t//$'ú'/u}"; __t="${__t//$'û'/u}"; __t="${__t//$'ü'/u}"
+    __t="${__t//$'Ù'/U}"; __t="${__t//$'Ú'/U}"; __t="${__t//$'Û'/U}"; __t="${__t//$'Ü'/U}"
+    __t="${__t//$'ñ'/n}"; __t="${__t//$'Ñ'/N}"
+    __t="${__t//$'ç'/c}"; __t="${__t//$'Ç'/C}"
+    __t="${__t//$'ý'/y}"; __t="${__t//$'ÿ'/y}"; __t="${__t//$'Ý'/Y}"
+    __t="${__t//$'ß'/ss}"; __t="${__t//$'æ'/ae}"; __t="${__t//$'Æ'/AE}"
+
+    printf -v "$2" '%s' "$__t"
+}
+
 # Shared front half of both sanitisers: strip control characters, fold
 # homoglyphs, DELETE the Windows-reserved set and the apostrophe, collapse
 # whitespace runs into single underscores.
@@ -1463,6 +1533,15 @@ _sanitize_core() {
     while [[ "$__san" == *[[:space:]] ]]; do __san="${__san%?}"; done
 
     _fold_homoglyphs "$__san" __san
+    _transliterate_cyrillic "$__san" __san
+
+    # Whatever is still non-ASCII after folding and transliteration — Greek,
+    # CJK, emoji, accented Latin — is replaced here. This is the backstop that
+    # matters: curl on Windows cannot write these paths and invents its own
+    # name instead, which reads to the caller as a failed download and stops
+    # the run. Replacement is per byte, so a multi-byte character leaves
+    # several underscores; the collapse below reduces them to one.
+    __san="${__san//[!$'\x01'-$'\x7f']/_}"
 
     # The backslash is handled separately and deliberately: inside a bash
     # bracket expression "\" is the escape character, not a member of the set,
@@ -2683,7 +2762,17 @@ download_model_images() {
             if [[ "$DOWNLOAD_LAST_CURL_EXIT" -eq 23 ]]; then
                 rm -f "$output_path" "${output_path}.part"
                 emit_asset_progress_unit "$model_id" "image" "failed"
-                abort_write_failure "downloading image $(basename "$output_path")" "$(dirname "$output_path")"
+                # A genuinely full disk still has to stop the run. Anything
+                # else -- a name the filesystem rejects, an antivirus lock, an
+                # over-long path -- costs one image, and a 676-model run should
+                # not die at model 178 over a thumbnail. The model's archive,
+                # which is the part that matters, is already safe.
+                if disk_space_is_low "$(dirname "$output_path")"; then
+                    abort_write_failure "downloading image $(basename "$output_path")" "$(dirname "$output_path")"
+                fi
+                images_unwritable=$((images_unwritable + 1))
+                echo -e "  ${YELLOW}[SKIP] Could not write image $(basename "$output_path") (curl exit 23); disk is fine, so continuing${NC}"
+                continue 2
             fi
 
             if [[ "$DOWNLOAD_LAST_FAILURE_REASON" == "rename" ]]; then
@@ -3317,6 +3406,7 @@ current_file=0
 total_downloads=0
 successful_downloads=0
 consecutive_failures=0
+images_unwritable=0
 compact_json_written=0
 zip_created=0
 models_zip_skipped=0
@@ -3702,6 +3792,11 @@ if [[ "$models_with_zero_files" -gt 0 ]]; then
 fi
 if [[ "$models_without_file_downloads" -gt 0 ]]; then
     echo -e "${YELLOW}Models whose files could not be downloaded: $models_without_file_downloads${NC}"
+fi
+# Skipping an image keeps the run alive, but it must never be silent.
+if [[ "$images_unwritable" -gt 0 ]]; then
+    echo -e "${YELLOW}Images the filesystem would not accept (skipped, run continued): $images_unwritable${NC}"
+    echo -e "${CYAN}  Disk space was fine each time. Usually an antivirus lock or an over-long path.${NC}"
 fi
 if [[ "$models_zip_skipped" -gt 0 ]]; then
     echo -e "${GREEN}Models skipped (assets ZIP already present): $models_zip_skipped${NC}"
