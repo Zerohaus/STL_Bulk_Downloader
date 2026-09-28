@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.10] — 2026-09-28
+
+### Fixed
+- **The auto-batch settings did not survive a restart.** The settings are
+  rebuilt from a fixed list of keys when they are saved, and the three new
+  fields from 2.0.9 were not on that list, so the "Keep going" checkbox, the
+  pause length and the subfolder option silently reverted to their defaults
+  every time the app started. A run already under way was never affected,
+  since the loop reads the live checkbox rather than the saved file.
+
 ## [2.0.9] — 2026-09-28
 
 ### Added
