@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.0.9] — 2026-09-28
+
+### Added
+- **"Keep going": download a batch, wait, then start the next one.** Batching by
+  hand turned out to be measurably faster than one long run, and the reason is in
+  the shell script: the adaptive request gap is initialised at start-up and never
+  persisted, so every restart resets it to its 5s base. Measured from archive
+  timestamps, a 676-model run in one go managed 26.5 models/h with a 91s median
+  gap, while 100-model batches ran at 44-90 models/h with 26-67s gaps on
+  comparable model sizes.
+
+  Each batch lands in its own numbered subfolder, continuing from the highest
+  already on disk rather than a per-session counter, so a second session cannot
+  download over the first batch. The pause is a setting (20 minutes by default,
+  0-240) because the gap widened in the first place from MyMiniFactory pushing
+  back: restarting resets it, and the wait is what keeps that reset honest.
+
+  It stops by itself when nothing is pending, and stops immediately if a batch
+  fails or the session expires rather than repeating a broken run all night.
+  Stop cancels a pending wait as well as a running download.
+
+- **The running version is shown next to the app name.** Nothing in the window
+  said which build was loaded, and a download failure was once investigated at
+  length against source that the installed app did not contain.
+
 ## [2.0.8] — 2026-09-25
 
 ### Fixed
