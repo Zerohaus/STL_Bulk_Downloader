@@ -79,6 +79,11 @@ const elements = {
     depSkipBtn: document.getElementById("depSkipBtn"),
     runtimePath: document.getElementById("runtimePath"),
     appVersion: document.getElementById("appVersion"),
+    autoBatchCheck: document.getElementById("autoBatchCheck"),
+    autoBatchOptions: document.getElementById("autoBatchOptions"),
+    autoBatchPause: document.getElementById("autoBatchPause"),
+    autoBatchSubfolders: document.getElementById("autoBatchSubfolders"),
+    autoBatchStatus: document.getElementById("autoBatchStatus"),
     runExecuteBtn: document.getElementById("runExecuteBtn"),
     runNextBatchBtn: document.getElementById("runNextBatchBtn"),
     runStep1Btn: document.getElementById("runStep1Btn"),
@@ -142,6 +147,13 @@ let downloadRootHistory = [];
 let lastStableDownloadRoot = "";
 let batchProgressState = createDefaultBatchProgressState();
 let activeBatchPlan = null;
+// Declared up here with the other run state because setRunButtonsState() reads
+// autoBatchRunning, and that runs during start-up -- a `let` further down the
+// file would still be in its temporal dead zone and throw.
+let autoBatchRunning = false;
+let autoBatchCancelled = false;
+let autoBatchWaitTimer = null;
+let autoBatchWaitResolve = null;
 const sessionPipelineCompletedIds = new Set();
 let pipelineProgressState = createDefaultPipelineProgressState();
 
@@ -2243,6 +2255,11 @@ function getSettingsSnapshot() {
         batchSizeSelection: getBatchSizeSelection(),
         batchProgress: getBatchProgressSnapshot(),
         testModeCheck: elements.testModeCheck.checked,
+        autoBatchEnabled: elements.autoBatchCheck ? elements.autoBatchCheck.checked : false,
+        autoBatchPauseMinutes: elements.autoBatchPause
+            ? Math.max(0, parseInt(elements.autoBatchPause.value, 10) || 0)
+            : 20,
+        autoBatchSubfolders: elements.autoBatchSubfolders ? elements.autoBatchSubfolders.checked : true,
         basePath: elements.basePathInput.value,
         extractInPlace: elements.extractModeSelect.value === "true",
         jsonPath: elements.jsonPathInput.value,
@@ -2304,6 +2321,22 @@ function applySettingsToForm(settings) {
     elements.testModeCheck.checked = typeof settings.testModeCheck === "boolean"
         ? settings.testModeCheck
         : elements.testModeCheck.checked;
+
+    if (elements.autoBatchCheck && typeof settings.autoBatchEnabled === "boolean") {
+        elements.autoBatchCheck.checked = settings.autoBatchEnabled;
+    }
+    if (elements.autoBatchPause && Number.isFinite(Number(settings.autoBatchPauseMinutes))) {
+        elements.autoBatchPause.value = String(Math.max(0, Number(settings.autoBatchPauseMinutes)));
+    }
+    if (elements.autoBatchSubfolders && typeof settings.autoBatchSubfolders === "boolean") {
+        elements.autoBatchSubfolders.checked = settings.autoBatchSubfolders;
+    }
+    if (elements.autoBatchOptions && elements.autoBatchCheck) {
+        elements.autoBatchOptions.classList.toggle("hidden", !elements.autoBatchCheck.checked);
+        elements.runExecuteBtn.textContent = elements.autoBatchCheck.checked
+            ? "Start downloading batches"
+            : "Start download";
+    }
 
     if (typeof settings.basePath === "string" && settings.basePath) {
         elements.basePathInput.value = settings.basePath;
@@ -2388,7 +2421,8 @@ async function loadSavedSettings() {
 }
 
 function setRunButtonsState() {
-    const running = Boolean(activeRunId) || pipelineRunning || batchProgressState.inProgress;
+    const running = Boolean(activeRunId) || pipelineRunning || batchProgressState.inProgress
+        || autoBatchRunning;
 
     const readinessState = buildRequirementState();
     const readinessReady = readinessState.readiness === 100;
@@ -3662,6 +3696,197 @@ async function executePipeline() {
     }
 }
 
+// ------------------------------------------------------------- auto batching
+// Download a batch, wait, start the next. The wait is the point: the shell
+// script's adaptive request gap resets to its base value on every run, so
+// restarting is what keeps downloads fast over a long catalogue. But that gap
+// widened because MyMiniFactory pushed back, so pausing before handing it a
+// fresh 5s delay is what keeps the reset honest rather than just rude.
+function autoBatchEnabled() {
+    return Boolean(elements.autoBatchCheck && elements.autoBatchCheck.checked);
+}
+
+function setAutoBatchStatus(text, tone = "neutral") {
+    if (!elements.autoBatchStatus) {
+        return;
+    }
+    elements.autoBatchStatus.textContent = text;
+    elements.autoBatchStatus.className = text
+        ? `status status-${tone}`
+        : "status status-neutral hidden";
+}
+
+// Stop has to end a wait as well as a download, or the only way out of a
+// 20-minute countdown is closing the app.
+function cancelAutoBatch() {
+    if (!autoBatchRunning) {
+        return;
+    }
+    autoBatchCancelled = true;
+    if (autoBatchWaitTimer) {
+        clearInterval(autoBatchWaitTimer);
+        autoBatchWaitTimer = null;
+    }
+    if (autoBatchWaitResolve) {
+        const resolve = autoBatchWaitResolve;
+        autoBatchWaitResolve = null;
+        resolve(false);
+    }
+}
+
+function waitWithCountdown(totalSeconds) {
+    return new Promise((resolve) => {
+        if (totalSeconds <= 0 || autoBatchCancelled) {
+            resolve(!autoBatchCancelled);
+            return;
+        }
+
+        let left = totalSeconds;
+        autoBatchWaitResolve = resolve;
+
+        const tick = () => {
+            if (autoBatchCancelled) {
+                return;
+            }
+            const mins = Math.floor(left / 60);
+            const secs = left % 60;
+            setAutoBatchStatus(
+                `Waiting ${mins}m ${String(secs).padStart(2, "0")}s before the next batch. Stop to cancel.`,
+                "warn"
+            );
+            if (left <= 0) {
+                clearInterval(autoBatchWaitTimer);
+                autoBatchWaitTimer = null;
+                autoBatchWaitResolve = null;
+                resolve(true);
+                return;
+            }
+            left -= 1;
+        };
+
+        tick();
+        autoBatchWaitTimer = setInterval(tick, 1000);
+    });
+}
+
+async function moveToNextBatchFolder() {
+    if (!elements.autoBatchSubfolders || !elements.autoBatchSubfolders.checked) {
+        return true;
+    }
+    if (!mmfDesktopApi || !mmfDesktopApi.nextBatchFolder) {
+        return true;
+    }
+
+    const current = getActiveDownloadsPath();
+    // When the folder already ends in a number, its parent is the base --
+    // otherwise batches would nest as 1/2/3 instead of sitting side by side.
+    const base = /[\\/]\d+$/.test(current) ? current.replace(/[\\/]\d+$/, "") : current;
+
+    let result = null;
+    try {
+        result = await mmfDesktopApi.nextBatchFolder({ basePath: base });
+    } catch (err) {
+        appendRunLog(`[auto] Could not read ${base}: ${String(err && err.message ? err.message : err)}`, "stderr");
+        return false;
+    }
+
+    if (!result || !result.ok) {
+        appendRunLog(
+            `[auto] Could not work out the next batch folder: ${result && result.message ? result.message : "unknown error"}`,
+            "stderr"
+        );
+        return false;
+    }
+
+    elements.downloadRootInput.value = result.nextPath;
+    elements.downloadRootInput.dispatchEvent(new Event("change", { bubbles: true }));
+    appendRunLog(`[auto] Next batch downloads to ${result.nextPath}`);
+    return true;
+}
+
+async function runAutoBatches() {
+    autoBatchRunning = true;
+    autoBatchCancelled = false;
+    let completedBatches = 0;
+
+    try {
+        while (!autoBatchCancelled) {
+            const pending = getPendingModelIds();
+            if (pending.length === 0) {
+                setAutoBatchStatus(
+                    completedBatches > 0
+                        ? `Finished. ${completedBatches} batch(es) downloaded, nothing left pending.`
+                        : "Nothing pending to download.",
+                    "ok"
+                );
+                break;
+            }
+
+            if (completedBatches > 0 && !(await moveToNextBatchFolder())) {
+                setAutoBatchStatus("Stopped: could not prepare the next batch folder.", "bad");
+                break;
+            }
+
+            setAutoBatchStatus(
+                `Batch ${completedBatches + 1} running. ${pending.length} model(s) pending.`,
+                "ok"
+            );
+            await executePipeline();
+            completedBatches += 1;
+
+            // Never carry on past a failure: a bad session or a disk problem
+            // would otherwise repeat once per batch for the rest of the night.
+            if (batchProgressState.lastStatus !== "completed") {
+                setAutoBatchStatus(
+                    `Stopped after batch ${completedBatches}: ${batchProgressState.lastError || "the batch did not finish"}`,
+                    "bad"
+                );
+                appendRunLog("[auto] Stopping: the last batch did not complete successfully.", "stderr");
+                break;
+            }
+
+            if (autoBatchCancelled) {
+                setAutoBatchStatus(`Stopped by you after ${completedBatches} batch(es).`, "warn");
+                break;
+            }
+
+            if (getPendingModelIds().length === 0) {
+                setAutoBatchStatus(`Finished. ${completedBatches} batch(es) downloaded, everything is done.`, "ok");
+                break;
+            }
+
+            const minutes = Math.max(0, parseInt(elements.autoBatchPause ? elements.autoBatchPause.value : "20", 10) || 0);
+            appendRunLog(`[auto] Batch ${completedBatches} finished. Waiting ${minutes} minute(s).`);
+            const waited = await waitWithCountdown(minutes * 60);
+            if (!waited || autoBatchCancelled) {
+                setAutoBatchStatus(`Stopped by you after ${completedBatches} batch(es).`, "warn");
+                break;
+            }
+        }
+    } finally {
+        autoBatchRunning = false;
+        autoBatchCancelled = false;
+        if (autoBatchWaitTimer) {
+            clearInterval(autoBatchWaitTimer);
+            autoBatchWaitTimer = null;
+        }
+        autoBatchWaitResolve = null;
+        setRunButtonsState();
+    }
+}
+
+function startDownloadAction() {
+    if (autoBatchRunning) {
+        setRunStatus("Automatic batching is already running.", "warn");
+        return;
+    }
+    if (autoBatchEnabled()) {
+        runAutoBatches();
+        return;
+    }
+    executePipeline();
+}
+
 async function executePostProcessFromHelper() {
     if (!mmfDesktopApi || !mmfDesktopApi.startWorkflowStep) {
         setRunStatus("Desktop execution is unavailable in browser mode.", "bad");
@@ -4131,9 +4356,35 @@ elements.depSkipBtn.addEventListener("click", () => {
     setStatus("Dependency install skipped. You can continue, but scripts may fail until dependencies are installed.", "warn");
 });
 
-elements.runExecuteBtn.addEventListener("click", executePipeline);
+elements.runExecuteBtn.addEventListener("click", startDownloadAction);
 if (elements.runNextBatchBtn) {
+    // "next batch" stays a single batch even with auto-batching armed, so
+    // there is always a way to run exactly one more.
     elements.runNextBatchBtn.addEventListener("click", executePipeline);
+}
+if (elements.autoBatchCheck) {
+    const syncAutoBatchUi = () => {
+        if (elements.autoBatchOptions) {
+            elements.autoBatchOptions.classList.toggle("hidden", !elements.autoBatchCheck.checked);
+        }
+        if (!elements.autoBatchCheck.checked) {
+            setAutoBatchStatus("");
+        }
+        elements.runExecuteBtn.textContent = elements.autoBatchCheck.checked
+            ? "Start downloading batches"
+            : "Start download";
+    };
+    elements.autoBatchCheck.addEventListener("change", () => {
+        syncAutoBatchUi();
+        scheduleSettingsSave();
+    });
+    syncAutoBatchUi();
+}
+if (elements.autoBatchPause) {
+    elements.autoBatchPause.addEventListener("change", scheduleSettingsSave);
+}
+if (elements.autoBatchSubfolders) {
+    elements.autoBatchSubfolders.addEventListener("change", scheduleSettingsSave);
 }
 elements.runStep1Btn.addEventListener("click", () => startWorkflowStep("step1", "Step 1"));
 elements.runStep2TestBtn.addEventListener("click", () => startWorkflowStep("step2-test", "Step 2 Test"));
@@ -4143,7 +4394,12 @@ elements.runStep4Btn.addEventListener("click", () => startWorkflowStep("step4", 
 if (elements.runPostProcessBtn) {
     elements.runPostProcessBtn.addEventListener("click", executePostProcessFromHelper);
 }
-elements.stopRunBtn.addEventListener("click", stopWorkflowStep);
+elements.stopRunBtn.addEventListener("click", () => {
+    // Cancel the auto-loop first: otherwise stopping the running batch just
+    // hands control back to the loop, which starts the next one.
+    cancelAutoBatch();
+    stopWorkflowStep();
+});
 elements.clearLogBtn.addEventListener("click", clearRunLog);
 
 if (elements.creatorIdFilterInput) {

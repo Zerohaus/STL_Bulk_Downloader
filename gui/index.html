@@ -237,11 +237,29 @@
                 Test one file first, before downloading everything
             </label>
 
+            <label class="checkline" for="autoBatchCheck">
+                <input id="autoBatchCheck" type="checkbox">
+                Keep going: download a batch, wait, then start the next one
+            </label>
+            <div id="autoBatchOptions" class="auto-batch-options hidden">
+                <label for="autoBatchPause">Wait</label>
+                <input id="autoBatchPause" type="number" min="0" max="240" step="1" value="20">
+                <span>minutes between batches</span>
+                <label class="checkline" for="autoBatchSubfolders">
+                    <input id="autoBatchSubfolders" type="checkbox" checked>
+                    put each batch in its own numbered subfolder
+                </label>
+                <p class="hint">Stops on its own when no models are left, and stops immediately if a
+                   batch fails or the session expires. Stop cancels a wait as well as a download.</p>
+            </div>
+
             <div class="run-grid">
                 <button id="runExecuteBtn" type="button" class="btn btn-primary btn-lg">Start download</button>
                 <button id="runNextBatchBtn" type="button" class="btn btn-secondary">Download next batch</button>
                 <button id="stopRunBtn" type="button" class="btn btn-danger" disabled>Stop</button>
             </div>
+
+            <p id="autoBatchStatus" class="status status-neutral hidden" aria-live="polite"></p>
 
             <div id="pipelineProgressPanel" class="pipeline-progress-panel hidden" aria-live="polite">
                 <div class="pipeline-progress-head">

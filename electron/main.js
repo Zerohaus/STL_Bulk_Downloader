@@ -1618,6 +1618,43 @@ function getRuntimeInfo(rawConfig) {
     };
 }
 
+// Auto-batching drops each batch into its own numbered subfolder. The next
+// number has to come from what is actually on disk: picking "1" because this
+// is the first batch of the session would download straight over the folder a
+// previous session left there.
+function getNextBatchFolder(rawPayload) {
+    const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+    const base = typeof payload.basePath === "string" ? payload.basePath.trim() : "";
+
+    if (!base) {
+        return { ok: false, message: "No base folder given." };
+    }
+
+    let existing = [];
+    try {
+        if (fs.existsSync(base)) {
+            existing = fs
+                .readdirSync(base, { withFileTypes: true })
+                .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+                .map((entry) => parseInt(entry.name, 10))
+                .filter((n) => Number.isFinite(n))
+                .sort((a, b) => a - b);
+        }
+    } catch (err) {
+        return { ok: false, message: `Could not read ${base}: ${String(err && err.message ? err.message : err)}` };
+    }
+
+    const next = existing.length > 0 ? existing[existing.length - 1] + 1 : 1;
+
+    return {
+        ok: true,
+        basePath: base,
+        existing,
+        nextNumber: next,
+        nextPath: path.join(base, String(next))
+    };
+}
+
 function getAllowedOpenPathRoots(rawConfig) {
     const runtime = getRuntimeInfo(rawConfig);
     const saved = loadSettingsFromDisk();
@@ -2756,6 +2793,10 @@ ipcMain.handle("desktop:install-missing-dependencies", async () => {
 
 ipcMain.handle("desktop:get-runtime-info", async (_event, payload) => {
     return getRuntimeInfo(payload);
+});
+
+ipcMain.handle("desktop:next-batch-folder", async (_event, payload) => {
+    return getNextBatchFolder(payload);
 });
 
 ipcMain.handle("desktop:pick-directory", async (_event, payload) => {

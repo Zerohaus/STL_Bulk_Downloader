@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
     checkDependencies: () => ipcRenderer.invoke("desktop:check-dependencies"),
     installMissingDependencies: () => ipcRenderer.invoke("desktop:install-missing-dependencies"),
     getRuntimeInfo: (payload) => ipcRenderer.invoke("desktop:get-runtime-info", payload),
+    nextBatchFolder: (payload) => ipcRenderer.invoke("desktop:next-batch-folder", payload),
     pickDirectory: (payload) => ipcRenderer.invoke("desktop:pick-directory", payload),
     openPath: (payload) => ipcRenderer.invoke("desktop:open-path", payload),
     listModelJsonFiles: (payload) => ipcRenderer.invoke("desktop:list-model-json-files", payload),

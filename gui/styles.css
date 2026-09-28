@@ -1406,3 +1406,28 @@ details.panel[open] > summary {
     letter-spacing: 0.02em;
     vertical-align: middle;
 }
+
+/* Auto-batching options, revealed under their checkbox. */
+.auto-batch-options {
+    margin: 6px 0 12px 26px;
+    padding: 10px 12px;
+    border-left: 2px solid var(--edge);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.auto-batch-options label {
+    margin: 0;
+}
+
+.auto-batch-options input[type="number"] {
+    width: 74px;
+}
+
+.auto-batch-options .checkline,
+.auto-batch-options .hint {
+    flex-basis: 100%;
+    margin: 4px 0 0;
+}
