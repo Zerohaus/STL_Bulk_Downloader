@@ -79,6 +79,9 @@ const DEFAULT_SETTINGS = {
         lastRunDownloadRoot: ""
     },
     testModeCheck: true,
+    autoBatchEnabled: false,
+    autoBatchPauseMinutes: 20,
+    autoBatchSubfolders: true,
     basePath: "",
     extractInPlace: true,
     jsonPath: "",
@@ -151,6 +154,17 @@ function sanitizeSettings(raw) {
         batchSizeSelection: sanitizeBatchSizeSelection(source.batchSizeSelection),
         batchProgress: sanitizeBatchProgress(source.batchProgress),
         testModeCheck: typeof source.testModeCheck === "boolean" ? source.testModeCheck : DEFAULT_SETTINGS.testModeCheck,
+        // This function rebuilds the object from a fixed key list, so anything
+        // missing here is dropped on save no matter what the renderer sent.
+        autoBatchEnabled: typeof source.autoBatchEnabled === "boolean"
+            ? source.autoBatchEnabled
+            : DEFAULT_SETTINGS.autoBatchEnabled,
+        autoBatchPauseMinutes: Number.isFinite(Number(source.autoBatchPauseMinutes))
+            ? Math.max(0, Math.min(240, Math.round(Number(source.autoBatchPauseMinutes))))
+            : DEFAULT_SETTINGS.autoBatchPauseMinutes,
+        autoBatchSubfolders: typeof source.autoBatchSubfolders === "boolean"
+            ? source.autoBatchSubfolders
+            : DEFAULT_SETTINGS.autoBatchSubfolders,
         basePath: typeof source.basePath === "string" ? source.basePath : DEFAULT_SETTINGS.basePath,
         extractInPlace: typeof source.extractInPlace === "boolean" ? source.extractInPlace : DEFAULT_SETTINGS.extractInPlace,
         jsonPath: typeof source.jsonPath === "string" ? source.jsonPath : DEFAULT_SETTINGS.jsonPath,
