@@ -3777,10 +3777,9 @@ async function moveToNextBatchFolder() {
         return true;
     }
 
-    const current = getActiveDownloadsPath();
-    // When the folder already ends in a number, its parent is the base --
-    // otherwise batches would nest as 1/2/3 instead of sitting side by side.
-    const base = /[\\/]\d+$/.test(current) ? current.replace(/[\\/]\d+$/, "") : current;
+    // main.js strips any trailing _<n> itself, so the current folder is handed
+    // over as-is and the series continues from whatever is already on disk.
+    const base = getActiveDownloadsPath();
 
     let result = null;
     try {
@@ -3822,7 +3821,10 @@ async function runAutoBatches() {
                 break;
             }
 
-            if (completedBatches > 0 && !(await moveToNextBatchFolder())) {
+            // Every batch gets its own folder, including the first: otherwise
+            // batch 1 lands in the creator folder and batch 2 becomes "_1",
+            // so folder N holds batch N+1 for the rest of the run.
+            if (!(await moveToNextBatchFolder())) {
                 setAutoBatchStatus("Stopped: could not prepare the next batch folder.", "bad");
                 break;
             }

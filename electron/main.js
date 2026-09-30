@@ -1632,40 +1632,61 @@ function getRuntimeInfo(rawConfig) {
     };
 }
 
-// Auto-batching drops each batch into its own numbered subfolder. The next
-// number has to come from what is actually on disk: picking "1" because this
-// is the first batch of the session would download straight over the folder a
-// previous session left there.
+// Auto-batching gives each batch its own folder, as a SIBLING of the creator
+// folder -- "CobraMode_2", not "CobraMode\2".
+//
+// That is not cosmetic. The uploader reads every top-level folder inside a
+// creator folder as a model, so a nested batch folder full of raw model_*.json
+// dumps is reported as a failed model and breaks the upload of its parent. A
+// sibling is a self-contained creator-shaped folder that uploads on its own.
+//
+// The next number comes from what is on disk, so a second session continues
+// the series instead of writing over the first batch.
 function getNextBatchFolder(rawPayload) {
     const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
-    const base = typeof payload.basePath === "string" ? payload.basePath.trim() : "";
+    const raw = typeof payload.basePath === "string" ? payload.basePath.trim() : "";
 
-    if (!base) {
+    if (!raw) {
         return { ok: false, message: "No base folder given." };
+    }
+
+    // Strip a trailing _<n> so pointing at "CobraMode_3" continues the
+    // CobraMode series rather than starting a "CobraMode_3_1" one.
+    const cleaned = raw.replace(/[\\/]+$/, "");
+    const parent = path.dirname(cleaned);
+    const stem = path.basename(cleaned).replace(/_\d+$/, "");
+
+    if (!stem) {
+        return { ok: false, message: `Could not work out a batch name from ${raw}` };
     }
 
     let existing = [];
     try {
-        if (fs.existsSync(base)) {
+        if (fs.existsSync(parent)) {
+            const pattern = new RegExp("^" + stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "_(\\d+)$");
             existing = fs
-                .readdirSync(base, { withFileTypes: true })
-                .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
-                .map((entry) => parseInt(entry.name, 10))
+                .readdirSync(parent, { withFileTypes: true })
+                .filter((entry) => entry.isDirectory())
+                .map((entry) => {
+                    const m = pattern.exec(entry.name);
+                    return m ? parseInt(m[1], 10) : null;
+                })
                 .filter((n) => Number.isFinite(n))
                 .sort((a, b) => a - b);
         }
     } catch (err) {
-        return { ok: false, message: `Could not read ${base}: ${String(err && err.message ? err.message : err)}` };
+        return { ok: false, message: `Could not read ${parent}: ${String(err && err.message ? err.message : err)}` };
     }
 
     const next = existing.length > 0 ? existing[existing.length - 1] + 1 : 1;
 
     return {
         ok: true,
-        basePath: base,
+        basePath: parent,
+        stem,
         existing,
         nextNumber: next,
-        nextPath: path.join(base, String(next))
+        nextPath: path.join(parent, `${stem}_${next}`)
     };
 }
 
