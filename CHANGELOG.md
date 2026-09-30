@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.0.11] — 2026-09-30
+
+### Fixed
+- **Automatic batching put each batch in a folder that broke the upload.**
+  Batches were downloaded into `<Creator>`, ``, ``. The uploader reads
+  every top-level folder inside a creator folder as a model, so a batch folder
+  full of raw `model_*.json` dumps is reported as a failed model and takes its
+  parent creator folder down with it.
+
+  Each batch now goes into `<Creator>_1`, `<Creator>_2` and so on, alongside the
+  creator folder rather than inside it. Each one is a self-contained folder that
+  uploads on its own. Pointing the app at an existing batch folder continues the
+  series instead of nesting another level, and the number still comes from what
+  is already on disk.
+
+- **The first batch did not get its own folder.** The folder only changed from
+  the second batch onward, so batch 1 landed in the creator folder and batch 2
+  became `_1` — every folder after that held the batch after the one it was
+  named for.
+
+### Note
+- Batches downloaded with 2.0.9 sit inside the creator folder. Renaming such a
+  folder to `<Creator>_<n>`, beside the creator folder, is all that is needed.
+
 ## [2.0.10] — 2026-09-28
 
 ### Fixed
