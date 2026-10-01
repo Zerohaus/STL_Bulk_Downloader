@@ -1690,6 +1690,95 @@ function getNextBatchFolder(rawPayload) {
     };
 }
 
+// Which models are already on disk, so a creator who adds a few models a week
+// does not mean re-downloading everything they have ever published.
+//
+// The folders are the record, deliberately. A ledger file can drift from
+// reality -- deleted, moved, or written when a run died half way -- whereas a
+// model folder holding an archive is proof the download finished. This scans
+// the creator folder and its <Creator>_<n> batch siblings.
+//
+// A folder with no archive in it is NOT counted: a half-finished model must be
+// downloaded again, not skipped forever.
+function scanDownloadedModelIds(rawPayload) {
+    const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+    const raw = typeof payload.basePath === "string" ? payload.basePath.trim() : "";
+
+    if (!raw) {
+        return { ok: false, message: "No folder given." };
+    }
+
+    const cleaned = raw.replace(/[\\/]+$/, "");
+    const parent = path.dirname(cleaned);
+    const stem = path.basename(cleaned).replace(/_\d+$/, "");
+    if (!stem) {
+        return { ok: false, message: `Could not work out a creator name from ${raw}` };
+    }
+
+    const roots = [];
+    try {
+        if (fs.existsSync(parent)) {
+            const siblingPattern = new RegExp(
+                "^" + stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(_\\d+)?$"
+            );
+            for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+                if (entry.isDirectory() && siblingPattern.test(entry.name)) {
+                    roots.push(path.join(parent, entry.name));
+                }
+            }
+        }
+    } catch (err) {
+        return { ok: false, message: `Could not read ${parent}: ${String(err && err.message ? err.message : err)}` };
+    }
+
+    const ids = new Set();
+    let incomplete = 0;
+
+    for (const root of roots) {
+        const stl = path.join(root, "stl_files");
+        let entries = [];
+        try {
+            if (!fs.existsSync(stl)) {
+                continue;
+            }
+            entries = fs.readdirSync(stl, { withFileTypes: true });
+        } catch (err) {
+            continue;
+        }
+
+        for (const entry of entries) {
+            if (!entry.isDirectory()) {
+                continue;
+            }
+            const m = /^(\d+)_/.exec(entry.name);
+            if (!m) {
+                continue;
+            }
+            let hasArchive = false;
+            try {
+                hasArchive = fs
+                    .readdirSync(path.join(stl, entry.name))
+                    .some((f) => f.toLowerCase().endsWith(".zip"));
+            } catch (err) {
+                hasArchive = false;
+            }
+            if (hasArchive) {
+                ids.add(parseInt(m[1], 10));
+            } else {
+                incomplete += 1;
+            }
+        }
+    }
+
+    return {
+        ok: true,
+        stem,
+        folders: roots.map((r) => path.basename(r)).sort(),
+        ids: [...ids].sort((a, b) => a - b),
+        incomplete
+    };
+}
+
 function getAllowedOpenPathRoots(rawConfig) {
     const runtime = getRuntimeInfo(rawConfig);
     const saved = loadSettingsFromDisk();
@@ -2832,6 +2921,10 @@ ipcMain.handle("desktop:get-runtime-info", async (_event, payload) => {
 
 ipcMain.handle("desktop:next-batch-folder", async (_event, payload) => {
     return getNextBatchFolder(payload);
+});
+
+ipcMain.handle("desktop:scan-downloaded-ids", async (_event, payload) => {
+    return scanDownloadedModelIds(payload);
 });
 
 ipcMain.handle("desktop:pick-directory", async (_event, payload) => {

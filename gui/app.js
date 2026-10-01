@@ -84,6 +84,7 @@ const elements = {
     autoBatchPause: document.getElementById("autoBatchPause"),
     autoBatchSubfolders: document.getElementById("autoBatchSubfolders"),
     autoBatchStatus: document.getElementById("autoBatchStatus"),
+    rescanDownloadedBtn: document.getElementById("rescanDownloadedBtn"),
     runExecuteBtn: document.getElementById("runExecuteBtn"),
     runNextBatchBtn: document.getElementById("runNextBatchBtn"),
     runStep1Btn: document.getElementById("runStep1Btn"),
@@ -2753,6 +2754,7 @@ async function autoLoadOwnModelIds(options = {}) {
         }
 
         setModelIdEntriesFromCatalog(catalogItems);
+        await markAlreadyDownloadedFromDisk({ silent: true });
         refreshDashboard();
         scheduleSettingsSave();
 
@@ -3702,6 +3704,68 @@ async function executePipeline() {
 // restarting is what keeps downloads fast over a long catalogue. But that gap
 // widened because MyMiniFactory pushed back, so pausing before handing it a
 // fresh 5s delay is what keeps the reset honest rather than just rude.
+// A creator who publishes a few models a week should mean downloading a few
+// models a week. The folders already on disk say what has been fetched, so a
+// freshly loaded catalogue is checked against them and only the new models are
+// queued. The disk is used rather than a saved list on purpose: the saved list
+// is pruned to whatever catalogue is currently loaded, so switching creators
+// and coming back would otherwise look like nothing had ever been downloaded.
+async function markAlreadyDownloadedFromDisk(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!mmfDesktopApi || !mmfDesktopApi.scanDownloadedIds) {
+        return null;
+    }
+
+    const base = getActiveDownloadsPath();
+    if (!base) {
+        return null;
+    }
+
+    let result = null;
+    try {
+        result = await mmfDesktopApi.scanDownloadedIds({ basePath: base });
+    } catch (err) {
+        appendRunLog(`[resume] Could not check what is already downloaded: ${String(err && err.message ? err.message : err)}`, "stderr");
+        return null;
+    }
+    if (!result || !result.ok) {
+        return null;
+    }
+
+    const loaded = new Set(getOrderedValidModelIds());
+    const onDisk = sanitizeNumericIdList(result.ids).filter((id) => loaded.has(id));
+    if (onDisk.length === 0) {
+        if (!silent) {
+            setStatus(`Nothing from this catalogue is downloaded yet in ${result.folders.join(", ") || base}.`, "neutral");
+        }
+        return result;
+    }
+
+    const completed = new Set(sanitizeNumericIdList(batchProgressState.completedIds));
+    const before = completed.size;
+    onDisk.forEach((id) => completed.add(id));
+    batchProgressState.completedIds = [...completed];
+
+    reconcileBatchProgressWithCurrentIds();
+    updateBatchStatusUi();
+    renderModelIdList();
+    setRunButtonsState();
+    scheduleSettingsSave();
+
+    const pending = getPendingModelIds().length;
+    const added = completed.size - before;
+    const where = result.folders.length > 0 ? result.folders.join(", ") : base;
+    appendRunLog(`[resume] ${onDisk.length} of ${loaded.size} model(s) already downloaded in ${where}; ${pending} to fetch.`);
+    if (!silent) {
+        setStatus(
+            `${onDisk.length} already downloaded, ${pending} new to fetch.` +
+            (result.incomplete ? ` ${result.incomplete} folder(s) have no archive and will be retried.` : ""),
+            "ok"
+        );
+    }
+    return { ...result, matched: onDisk.length, added, pending };
+}
+
 function autoBatchEnabled() {
     return Boolean(elements.autoBatchCheck && elements.autoBatchCheck.checked);
 }
@@ -4381,6 +4445,11 @@ if (elements.autoBatchCheck) {
         scheduleSettingsSave();
     });
     syncAutoBatchUi();
+}
+if (elements.rescanDownloadedBtn) {
+    elements.rescanDownloadedBtn.addEventListener("click", () => {
+        markAlreadyDownloadedFromDisk({ silent: false });
+    });
 }
 if (elements.autoBatchPause) {
     elements.autoBatchPause.addEventListener("change", scheduleSettingsSave);
