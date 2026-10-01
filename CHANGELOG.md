@@ -82,16 +82,16 @@
 ## [2.0.7] — 2026-09-21
 
 ### Changed
-- **A creator's file grouping is now preserved.** *The Last Hearth Inn* ships on
-  MyMiniFactory as `LHI_INN_LV1_v3.zip` through `LHI_INN_LV5.zip` plus
-  `LHI_INN_XTRAS.zip`, so a buyer can print one floor at a time. The downloader
+- **A creator's file grouping is now preserved.** *a multi-storey building set* ships on
+  MyMiniFactory as `BUILDING_LV1_v3.zip` through `BUILDING_LV5.zip` plus
+  `BUILDING_XTRAS.zip`, so a buyer can print one floor at a time. The downloader
   expanded every declared `.zip` and repacked the lot into a single 712 MB
   archive, and that grouping cannot be recovered afterwards — the creator raised
   it as a complaint, correctly.
 
   A `.zip` that MyMiniFactory declares is now kept as its own file in the model
   folder. Only loose files are packed together, so the common case is unchanged:
-  of 430 Brander Roullett models, 428 are loose meshes. A mixed model gets its
+  of 430 Creator Two models, 428 are loose meshes. A mixed model gets its
   creator archives plus one archive of the leftovers.
 
   `MMF_PRESERVE_DECLARED_ZIPS=0` restores the previous single-archive behaviour.

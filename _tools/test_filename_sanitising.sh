@@ -48,11 +48,11 @@ check $'Müller Señor.stl' 'Muller_Senor.stl'
 check $'Straße.zip'      'Strasse.zip'
 
 echo "=== Greek lookalikes in Roman numerals still fold (pre-existing rule) ==="
-check $'Mausoleum ΙΙ.stl' 'Mausoleum_II.stl'
+check $'Crypt ΙΙ.stl'         'Crypt_II.stl'
 
 echo "=== ordinary names are untouched ==="
 check 'plain_v2.stl'                 'plain_v2.stl'
-check 'Monster Hunter Corner.zip'    'Monster_Hunter_Corner.zip'
+check 'Example Corner Set.zip'       'Example_Corner_Set.zip'
 check 'part-a_v1.1.stl'              'part-a_v1.1.stl'
 
 echo "=== anything else degrades to ASCII rather than breaking the run ==="

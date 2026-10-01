@@ -1633,7 +1633,7 @@ function getRuntimeInfo(rawConfig) {
 }
 
 // Auto-batching gives each batch its own folder, as a SIBLING of the creator
-// folder -- "CobraMode_2", not "CobraMode\2".
+// folder -- "CreatorFour_2", not "CreatorFour\2".
 //
 // That is not cosmetic. The uploader reads every top-level folder inside a
 // creator folder as a model, so a nested batch folder full of raw model_*.json
@@ -1650,8 +1650,8 @@ function getNextBatchFolder(rawPayload) {
         return { ok: false, message: "No base folder given." };
     }
 
-    // Strip a trailing _<n> so pointing at "CobraMode_3" continues the
-    // CobraMode series rather than starting a "CobraMode_3_1" one.
+    // Strip a trailing _<n> so pointing at "CreatorFour_3" continues the
+    // CreatorFour series rather than starting a "CreatorFour_3_1" one.
     const cleaned = raw.replace(/[\\/]+$/, "");
     const parent = path.dirname(cleaned);
     const stem = path.basename(cleaned).replace(/_\d+$/, "");

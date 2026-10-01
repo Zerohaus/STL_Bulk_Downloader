@@ -243,9 +243,9 @@ convention.
 
 - **Flat** — no directories.
 - **Nested zips are expanded, recursively.** A model whose `files.items` is a single
-  `Mausoleum 02.zip` has that zip's *contents* in the archive, not the zip. Nesting can be
-  two deep: the whole-model download of *The Grand Bridge* is an archive containing
-  `The Grand Bridge.zip`, which in turn holds the meshes. **Cap the recursion depth.**
+  `Example Crypt 02.zip` has that zip's *contents* in the archive, not the zip. Nesting can be
+  two deep: the whole-model download of *a large bridge model* is an archive containing
+  `a large bridge model.zip`, which in turn holds the meshes. **Cap the recursion depth.**
 - **Compression is conditional** — measured across the entire library:
 
   | Model's file list | Compression | Count |
@@ -254,7 +254,7 @@ convention.
   | contains a `.zip` | `ZIP_DEFLATED` | **36 / 45** |
 
   This matters: a model delivered as a zip gets expanded and its contents are already
-  compressed, so storing them raw bloats the archive badly — *The Grand Bridge* went
+  compressed, so storing them raw bloats the archive badly — *a large bridge model* went
   1041 MB → 1852 MB before this rule was applied.
 
 - Verify each downloaded file's byte count against the API's declared `size` before
@@ -262,8 +262,8 @@ convention.
 
 ### 4.3a Declared archives are kept separate (v2.0.7 onward)
 
-**A creator's file grouping is a decision, not packaging.** *The Last Hearth Inn*
-ships as `LHI_INN_LV1_v3.zip` … `LHI_INN_LV5.zip` plus `LHI_INN_XTRAS.zip` so a buyer
+**A creator's file grouping is a decision, not packaging.** *a multi-storey building set*
+ships as `BUILDING_LV1_v3.zip` … `BUILDING_LV5.zip` plus `BUILDING_XTRAS.zip` so a buyer
 can print one floor at a time. Expanding and repacking those into a single 712 MB
 archive throws that away, and **nothing downstream can reconstruct it** — the creator
 raised it as a complaint.
@@ -277,7 +277,7 @@ folder.** Only loose files are packed into `<ModelName>.zip`.
 | several declared `.zip` | those archives, kept side by side, untouched |
 | mixed | the declared archives **plus** one `<ModelName>.zip` of the loose remainder |
 
-Scale check before changing it: of 430 Brander Roullett models, **428 are loose
+Scale check before changing it: of 430 Creator Two models, **428 are loose
 meshes** and 1 declares multiple archives — so the common path is untouched and only
 genuinely grouped models differ.
 

@@ -37,26 +37,26 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
 }
 
 # ---------------------------------------------------------------- scenario 1
-# A creator who grouped their model into several archives (The Last Hearth Inn).
+# A creator who grouped their model into several archives (a multi-storey building set).
 scenario_grouped() {
     local dir="${ROOT}/grouped"; mkdir -p "$dir"
-    make_zip "${dir}/LHI_INN_LV1.zip" floor1.stl "level one mesh"
-    make_zip "${dir}/LHI_INN_LV2.zip" floor2.stl "level two mesh"
-    make_zip "${dir}/LHI_INN_XTRAS.zip" extra.stl "extras mesh"
+    make_zip "${dir}/BUILDING_LV1.zip" floor1.stl "level one mesh"
+    make_zip "${dir}/BUILDING_LV2.zip" floor2.stl "level two mesh"
+    make_zip "${dir}/BUILDING_XTRAS.zip" extra.stl "extras mesh"
     cat > "${dir}/src.json" <<'JSON'
-{"id":176982,"name":"The Last Hearth Inn","files":{"items":[
- {"filename":"LHI_INN_LV1.zip","size":1},
- {"filename":"LHI_INN_LV2.zip","size":1},
- {"filename":"LHI_INN_XTRAS.zip","size":1}]}}
+{"id":176982,"name":"a multi-storey building set","files":{"items":[
+ {"filename":"BUILDING_LV1.zip","size":1},
+ {"filename":"BUILDING_LV2.zip","size":1},
+ {"filename":"BUILDING_XTRAS.zip","size":1}]}}
 JSON
     compress_non_json_assets "$dir" "${dir}/src.json" 176982 >/dev/null 2>&1
     local got; got="$(cd "$dir" && ls *.zip 2>/dev/null | sort | tr '\n' ' ')"
     check "grouped: all three creator archives kept separate" \
-          "LHI_INN_LV1.zip LHI_INN_LV2.zip LHI_INN_XTRAS.zip " "$got"
+          "BUILDING_LV1.zip BUILDING_LV2.zip BUILDING_XTRAS.zip " "$got"
     check "grouped: no merged model archive created" \
           "0" "$(cd "$dir" && ls The_Last_Hearth_Inn.zip 2>/dev/null | wc -l | tr -d ' ')"
     check "grouped: contents intact inside a kept archive" \
-          "floor1.stl" "$(unzip -Z1 "${dir}/LHI_INN_LV1.zip" 2>/dev/null | tr -d '\r')"
+          "floor1.stl" "$(unzip -Z1 "${dir}/BUILDING_LV1.zip" 2>/dev/null | tr -d '\r')"
 }
 
 # ---------------------------------------------------------------- scenario 2
@@ -85,14 +85,14 @@ scenario_mixed() {
     make_zip "${dir}/Bases.zip" base.stl "a base"
     printf 'readme' > "${dir}/notes.pdf"
     cat > "${dir}/src.json" <<'JSON'
-{"id":96892,"name":"Nightmare Horse","files":{"items":[
+{"id":96892,"name":"Example Model B","files":{"items":[
  {"filename":"Bases.zip","size":1},
  {"filename":"notes.pdf","size":6}]}}
 JSON
     compress_non_json_assets "$dir" "${dir}/src.json" 96892 >/dev/null 2>&1
     local got; got="$(cd "$dir" && ls *.zip 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')"
     check "mixed: creator archive kept AND extras packed" \
-          "Bases.zip Nightmare_Horse.zip" "$got"
+          "Bases.zip Example_Model_B.zip" "$got"
     check "mixed: kept archive still holds its own file" \
           "base.stl" "$(unzip -Z1 "${dir}/Bases.zip" 2>/dev/null | tr -d '\r')"
 }
