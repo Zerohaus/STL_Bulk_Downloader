@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.13] — 2026-10-01
+
+### Added
+- **Only new models are downloaded.** When a creator publishes a few models at a
+  time, loading their catalogue now checks what is already on disk and queues
+  just the additions, instead of needing the finished ones picked out by hand.
+
+  What counts as downloaded is read from the folders themselves rather than a
+  saved list. The saved list is pruned to whatever catalogue is loaded, so
+  downloading one creator and then loading another discarded the first one's
+  history; folders survive that, and an app reinstall, and a model folder
+  holding an archive is proof the download actually finished.
+
+  The scan covers the creator folder and its `<Creator>_<n>` batch folders. It
+  ignores other creators and `_originals` backups, and a model folder with no
+  archive in it is treated as unfinished and fetched again rather than skipped.
+
+  It runs after **Load my models**, and **Re-check what's already downloaded**
+  repeats it if the download folder is changed afterwards.
+
 ## [2.0.12] — 2026-09-30
 
 ### Fixed
