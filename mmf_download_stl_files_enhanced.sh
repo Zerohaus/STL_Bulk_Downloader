@@ -2573,9 +2573,43 @@ write_compact_model_json() {
         selected_category_tag_names_json='[]'
     fi
 
-    if $JQ_CMD --argjson selected_categories "$selected_categories_json" --argjson selected_category_tag_names "$selected_category_tag_names_json" --arg cached_description "$cached_description" '{
+    if $JQ_CMD --argjson selected_categories "$selected_categories_json" --argjson selected_category_tag_names "$selected_category_tag_names_json" --arg cached_description "$cached_description" '
+    # MyMiniFactory serves the blurb twice: "description" is plain text with
+    # every line break already stripped, and "description_html" is what the
+    # creator actually wrote. Taking the plain field turned formatted listings
+    # into one unbroken wall of text -- measured across 204 models, NONE had a
+    # line break in the plain field while 91% had paragraphs in the HTML.
+    # Block tags become blank lines (a single newline would be swallowed by
+    # anything that renders markdown, putting the wall straight back).
+    def html_to_text:
+        gsub("\r"; "")
+      | gsub("(?i)<br[ \t]*/?>"; "\n")
+      | gsub("(?i)</p[ \t]*>"; "\n\n")
+      | gsub("(?i)</li[ \t]*>"; "\n")
+      | gsub("(?i)<li[^>]*>"; "- ")
+      | gsub("(?i)</(h[1-6]|div|tr|ul|ol|blockquote)[ \t]*>"; "\n\n")
+      | gsub("<[^>]*>"; "")
+      | gsub("&nbsp;"; " ") | gsub("&#160;"; " ") | gsub(" "; " ")
+      | gsub("&lt;"; "<") | gsub("&gt;"; ">") | gsub("&quot;"; "\"")
+      | gsub("&#39;"; "'"'"'") | gsub("&apos;"; "'"'"'")
+      | gsub("&amp;"; "&")
+      | gsub("[ \t]+"; " ") | gsub(" +\n"; "\n") | gsub("\n +"; "\n")
+      | gsub("\n{3,}"; "\n\n")
+      | sub("^[ \t\n]+"; "") | sub("[ \t\n]+$"; "");
+
+    # Prefer the creator'"'"'s formatting, fall back to the flat field, and never
+    # return something emptier than what we started with.
+    def best_description:
+      (.description_html // "") as $html
+      | (.description // "") as $plain
+      | if ($html | length) > 0
+        then ($html | html_to_text) as $t
+             | (if ($t | length) > 0 then $t else $plain end)
+        else $plain
+        end;
+    {
         name: (.name // ""),
-        description: (if ((.description // "") | length) > 0 then .description else $cached_description end),
+        description: (best_description as $d | if ($d | length) > 0 then $d else $cached_description end),
         tags: (
             (
                 if .tags == null then []
