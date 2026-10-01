@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.12] — 2026-09-30
+
+### Fixed
+- **Descriptions arrived as a wall of text.** MyMiniFactory serves a model's
+  blurb twice: a plain-text field with every line break already stripped, and
+  an HTML field holding what the creator actually wrote. The downloader read
+  the plain one. Across 204 models checked, *none* had a line break in the
+  plain field while 186 (91%) had paragraphs in the HTML — one listing was
+  16 paragraphs flattened into 400 unbroken characters.
+
+  The description is now rebuilt from the HTML, so paragraphs, "Set includes"
+  lists and line breaks survive. Entities and non-breaking spaces are resolved,
+  and a model with no HTML still falls back to the plain field.
+
+### Note
+- Models downloaded before 2.0.12 keep the flattened description. The original
+  formatting is still recoverable from the `description_html` in the run's
+  top-level `model_<id>.json` files.
+
 ## [2.0.11] — 2026-09-30
 
 ### Fixed
