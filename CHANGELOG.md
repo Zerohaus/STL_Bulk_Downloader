@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.14] — 2026-10-02
+
+### Fixed
+- **Deleting a creator's folders made the downloader forget what it had
+  fetched.** 2.0.13 worked out what was already downloaded by reading the
+  folders on disk, which only holds while those folders exist. A large
+  catalogue is uploaded and cleared as it goes — roughly 500 GB for a
+  3,500-model creator — so the record disappeared with the files, and the next
+  time that creator published anything the whole catalogue came down again.
+
+  A list of downloaded model ids is now kept at
+  `<parent>\_downloaded\<Creator>.json`, beside the creator folders rather
+  than inside any of them. It is written as each batch finishes and merged with
+  the folder scan, so it survives the folders being deleted, moved or
+  re-downloaded. One file per creator, plain JSON; deleting it only means those
+  models get downloaded again.
+
+  The ledger is written whole and renamed into place, so an interrupted write
+  cannot leave a truncated list that silently forgets half a catalogue.
+
 ## [2.0.13] — 2026-10-01
 
 ### Added
