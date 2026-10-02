@@ -1700,6 +1700,79 @@ function getNextBatchFolder(rawPayload) {
 //
 // A folder with no archive in it is NOT counted: a half-finished model must be
 // downloaded again, not skipped forever.
+// Folders are proof a download finished, but they do not last: a large
+// catalogue is uploaded and cleared as it goes, and deleting the folders would
+// otherwise erase the record and re-download everything next time the creator
+// adds models. So a small ledger is kept beside the creator folders, outside
+// any of them, and the two sources are merged.
+function downloadLedgerPath(basePath) {
+    const cleaned = basePath.replace(/[\\/]+$/, "");
+    const parent = path.dirname(cleaned);
+    const stem = path.basename(cleaned).replace(/_\d+$/, "");
+    if (!stem) {
+        return null;
+    }
+    return { dir: path.join(parent, "_downloaded"), file: path.join(parent, "_downloaded", `${stem}.json`), stem };
+}
+
+function readDownloadLedger(basePath) {
+    const loc = downloadLedgerPath(basePath);
+    if (!loc) {
+        return [];
+    }
+    try {
+        if (!fs.existsSync(loc.file)) {
+            return [];
+        }
+        const parsed = JSON.parse(fs.readFileSync(loc.file, "utf8"));
+        const ids = Array.isArray(parsed) ? parsed : parsed.ids;
+        return Array.isArray(ids)
+            ? ids.map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n))
+            : [];
+    } catch (err) {
+        return [];
+    }
+}
+
+function recordDownloadedIds(rawPayload) {
+    const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+    const base = typeof payload.basePath === "string" ? payload.basePath.trim() : "";
+    const incoming = Array.isArray(payload.ids)
+        ? payload.ids.map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n))
+        : [];
+
+    if (!base) {
+        return { ok: false, message: "No folder given." };
+    }
+    const loc = downloadLedgerPath(base);
+    if (!loc) {
+        return { ok: false, message: `Could not work out a creator name from ${base}` };
+    }
+
+    const merged = new Set(readDownloadLedger(base));
+    const before = merged.size;
+    incoming.forEach((id) => merged.add(id));
+    const ids = [...merged].sort((a, b) => a - b);
+
+    try {
+        fs.mkdirSync(loc.dir, { recursive: true });
+        // Written whole then renamed, so an interrupted write cannot leave a
+        // truncated ledger that silently forgets half the catalogue.
+        const tmp = loc.file + ".part";
+        fs.writeFileSync(tmp, JSON.stringify({
+            creator: loc.stem,
+            updated: new Date().toISOString(),
+            note: "Model ids already downloaded. Used to skip them next time; safe to delete, which only means they get downloaded again.",
+            ids
+        }, null, 1));
+        fs.renameSync(tmp, loc.file);
+    } catch (err) {
+        return { ok: false, message: `Could not write ${loc.file}: ${String(err && err.message ? err.message : err)}` };
+    }
+
+    return { ok: true, file: loc.file, total: ids.length, added: ids.length - before };
+}
+
 function scanDownloadedModelIds(rawPayload) {
     const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
     const raw = typeof payload.basePath === "string" ? payload.basePath.trim() : "";
@@ -1770,11 +1843,19 @@ function scanDownloadedModelIds(rawPayload) {
         }
     }
 
+    // The ledger covers everything already uploaded and deleted; the folders
+    // cover anything downloaded before the ledger existed, or restored by hand.
+    const onDisk = [...ids].sort((a, b) => a - b);
+    const fromLedger = readDownloadLedger(cleaned);
+    fromLedger.forEach((id) => ids.add(id));
+
     return {
         ok: true,
         stem,
         folders: roots.map((r) => path.basename(r)).sort(),
         ids: [...ids].sort((a, b) => a - b),
+        onDiskCount: onDisk.length,
+        ledgerCount: fromLedger.length,
         incomplete
     };
 }
@@ -2925,6 +3006,10 @@ ipcMain.handle("desktop:next-batch-folder", async (_event, payload) => {
 
 ipcMain.handle("desktop:scan-downloaded-ids", async (_event, payload) => {
     return scanDownloadedModelIds(payload);
+});
+
+ipcMain.handle("desktop:record-downloaded-ids", async (_event, payload) => {
+    return recordDownloadedIds(payload);
 });
 
 ipcMain.handle("desktop:pick-directory", async (_event, payload) => {

@@ -12,9 +12,10 @@ const path = require("path");
 
 // the real function, lifted out of main.js so this tests what ships
 const src = fs.readFileSync(path.join(__dirname, "..", "electron", "main.js"), "utf8");
-const start = src.indexOf("function scanDownloadedModelIds");
+const start = src.indexOf("function downloadLedgerPath");
 const body = src.slice(start, src.indexOf("function getAllowedOpenPathRoots"));
-const scanDownloadedModelIds = new Function("fs", "path", "return " + body)(fs, path);
+const api = new Function("fs", "path", body + "; return { scanDownloadedModelIds, recordDownloadedIds };")(fs, path);
+const { scanDownloadedModelIds, recordDownloadedIds } = api;
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "dlscan-"));
 process.on("exit", () => fs.rmSync(root, { recursive: true, force: true }));
@@ -70,5 +71,34 @@ check("only new models (and the unfinished one) are queued", [105, 201, 202], to
 // a folder that does not exist yet must not throw
 const missing = scanDownloadedModelIds({ basePath: path.join(root, "NeverSeen") });
 check("an unknown creator reports nothing, without failing", [], missing.ids);
+
+// ---- the case that matters at scale: a large catalogue is uploaded and the
+// folders deleted to reclaim the disk. The record has to survive that, or the
+// next time the creator adds a model the whole catalogue comes down again.
+recordDownloadedIds({ basePath: path.join(root, "Creator"), ids: r.ids });
+for (const f of ["Creator", "Creator_2", "Creator_3"]) {
+    fs.rmSync(path.join(root, f), { recursive: true, force: true });
+}
+
+const afterDelete = scanDownloadedModelIds({ basePath: path.join(root, "Creator") });
+check("record survives deleting every folder", [101, 102, 103, 104], afterDelete.ids);
+check("nothing is left on disk to find", 0, afterDelete.onDiskCount);
+check("so the ledger is what knew", 4, afterDelete.ledgerCount);
+
+const stillToFetch = catalogueToday.filter((id) => !new Set(afterDelete.ids).has(id));
+check("still queues only the new models after deletion", [105, 201, 202], stillToFetch);
+
+// each creator keeps its own ledger
+recordDownloadedIds({ basePath: path.join(root, "OtherCreator"), ids: [999] });
+const other = scanDownloadedModelIds({ basePath: path.join(root, "OtherCreator") });
+check("one creator's ledger does not leak into another", false, other.ids.includes(101));
+
+// recording the same models twice must not grow the ledger
+const again = recordDownloadedIds({ basePath: path.join(root, "Creator"), ids: [101, 102] });
+check("re-recording adds nothing", 0, again.added);
+
+// pointing at a batch folder must find the creator's ledger
+const viaBatch = scanDownloadedModelIds({ basePath: path.join(root, "Creator_7") });
+check("ledger is found when pointed at a batch folder", [101, 102, 103, 104], viaBatch.ids);
 
 console.log("\n" + pass + "/" + pass + " passed");

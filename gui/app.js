@@ -3488,6 +3488,24 @@ function finalizeBatchPipelineSuccess() {
         rememberDownloadRoot(currentDownloadRoot, { save: false });
     }
 
+    // Write the ledger before anything else can go wrong. These folders get
+    // uploaded and deleted; without this, deleting them means downloading the
+    // whole catalogue again next time the creator adds a model.
+    if (mmfDesktopApi && mmfDesktopApi.recordDownloadedIds && completedNow.length > 0) {
+        const ledgerRoot = getActiveDownloadsPath();
+        if (ledgerRoot) {
+            Promise.resolve(mmfDesktopApi.recordDownloadedIds({ basePath: ledgerRoot, ids: completedNow }))
+                .then((res) => {
+                    if (res && res.ok) {
+                        appendRunLog(`[resume] Recorded ${completedNow.length} model(s); ${res.total} known downloaded for this creator.`);
+                    } else if (res && res.message) {
+                        appendRunLog(`[resume] Could not update the downloaded list: ${res.message}`, "stderr");
+                    }
+                })
+                .catch((err) => appendRunLog(`[resume] Could not update the downloaded list: ${String(err && err.message ? err.message : err)}`, "stderr"));
+        }
+    }
+
     activeBatchPlan = null;
     sessionPipelineCompletedIds.clear();
     reconcileBatchProgressWithCurrentIds();
@@ -3755,7 +3773,12 @@ async function markAlreadyDownloadedFromDisk(options = {}) {
     const pending = getPendingModelIds().length;
     const added = completed.size - before;
     const where = result.folders.length > 0 ? result.folders.join(", ") : base;
-    appendRunLog(`[resume] ${onDisk.length} of ${loaded.size} model(s) already downloaded in ${where}; ${pending} to fetch.`);
+    // Say which source knew about them: a creator whose folders were deleted
+    // after uploading is entirely ledger, and that is worth seeing.
+    const sources = [];
+    if (result.onDiskCount) sources.push(`${result.onDiskCount} on disk in ${where}`);
+    if (result.ledgerCount) sources.push(`${result.ledgerCount} in the downloaded list`);
+    appendRunLog(`[resume] ${onDisk.length} of ${loaded.size} model(s) already downloaded (${sources.join(", ") || "none"}); ${pending} to fetch.`);
     if (!silent) {
         setStatus(
             `${onDisk.length} already downloaded, ${pending} new to fetch.` +
